@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -320,13 +321,23 @@ MODELO_WHISPER = "small"
 _modelo, _lock_modelo = None, threading.Lock()
 
 
+def precisa_contorno_openmp():
+    """Só em ambiente conda (Anaconda/Miniconda): o numpy com MKL e o ctranslate2 carregam cada um
+    a sua libiomp5md.dll e o processo aborta. A Intel chama o contorno de "não suportado", por isso
+    ele NÃO vale no .venv dos scripts de início (numpy do PyPI usa OpenBLAS e o conflito não existe:
+    testado no Windows 10 em 2026-10-11)."""
+    if (Path(sys.prefix) / "conda-meta").exists():
+        os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+        return True
+    return False
+
+
 def transcrever(src, trechos=((0.0, None),)):
     """Transcreve a fala (PT-BR) dos trechos, emendados na ordem: (texto, [(ini_s, fim_s, palavra)]).
 
     Os tempos ficam na linha do tempo do vídeo final (`linha_do_tempo`), não na soma nominal.
     """
-    # Anaconda: numpy (MKL) e ctranslate2 trazem cada um sua cópia do OpenMP e o processo aborta sem isto.
-    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+    precisa_contorno_openmp()
     try:
         from faster_whisper import WhisperModel
         import numpy as np
@@ -836,5 +847,13 @@ def baixar(nome):
 
 
 if __name__ == "__main__":
+    import socket
+    with socket.socket() as s:
+        if s.connect_ex(("127.0.0.1", 5000)) == 0:
+            print("[ERRO] A porta 5000 já está em uso: o Corte Studio provavelmente já está aberto em outra janela.\n"
+                  "       Use http://127.0.0.1:5000 ou feche a outra janela e abra de novo.")
+            sys.exit(1)
+    if precisa_contorno_openmp():
+        print("[AVISO] Rodando no Python do Anaconda: contorno de OpenMP ligado. Prefira iniciar.bat/.sh (.venv).")
     print("Corte Studio em http://127.0.0.1:5000  (Ctrl+C para sair)")
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

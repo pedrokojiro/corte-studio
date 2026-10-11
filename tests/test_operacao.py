@@ -117,3 +117,12 @@ def test_render_avisa_fonte_ausente(studio, enviar, midia):
                       "audio_id": aud, "texto": "um dois", "legenda": True, "fonte": "FonteQueNaoExiste123",
                       "tempos": [[0.1, 0.4, "um"], [0.5, 0.9, "dois"]], "tempos_chave": f"a:{aud}"})
     assert any("FonteQueNaoExiste123" in a and "não está instalada" in a for a in r["avisos"])
+
+
+# ---------------------------------------------------------------- A9: contorno do OpenMP só no conda
+def test_contorno_openmp_so_em_ambiente_conda(tmp_path, monkeypatch):
+    monkeypatch.delenv("KMP_DUPLICATE_LIB_OK", raising=False)
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    assert A.precisa_contorno_openmp() is False and "KMP_DUPLICATE_LIB_OK" not in os.environ
+    (tmp_path / "conda-meta").mkdir()
+    assert A.precisa_contorno_openmp() is True and os.environ["KMP_DUPLICATE_LIB_OK"] == "TRUE"
