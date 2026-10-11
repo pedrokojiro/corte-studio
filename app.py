@@ -8,6 +8,8 @@ A transcrição (faster-whisper) roda local.
 O app não verifica direitos autorais: a responsabilidade é sua.
 """
 import asyncio
+import collections
+import contextlib
 import difflib
 import json
 import math
@@ -15,6 +17,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import unicodedata
@@ -56,11 +59,26 @@ def _float(v):
     return x if x == x and x > 0 else 0.0  # descarta NaN e não-positivos
 
 
-def run(cmd, cwd=None):
+def prazo_midia(segundos):
+    """Prazo generoso para processar `segundos` de mídia (CPU lenta incluída)."""
+    return 120 + 10 * max(0.0, segundos)
+
+
+def executar(cmd, cwd=None, timeout=600, texto=True):
+    """subprocess.run com prazo. Se estourar, o subprocess.run encerra (kill) o processo filho
+    e espera ele sair antes do erro: não sobra ffmpeg órfão."""
+    kw = {"text": True, "encoding": "utf-8", "errors": "replace"} if texto else {}
     try:
-        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout, **kw)
     except FileNotFoundError:
         raise Erro(f"'{cmd[0]}' não encontrado. Instale o ffmpeg e coloque no PATH.")
+    except subprocess.TimeoutExpired:
+        raise Erro(f"O {cmd[0]} passou de {timeout:.0f}s e foi interrompido. Tente um trecho menor, "
+                   "um arquivo mais leve ou feche outros programas pesados.", 504)
+
+
+def run(cmd, cwd=None, timeout=600):
+    r = executar(cmd, cwd=cwd, timeout=timeout)
     if r.returncode != 0:
         tail = " | ".join(r.stderr.strip().splitlines()[-6:])
         raise Erro(f"Falha no {cmd[0]}: {tail}")
@@ -69,7 +87,7 @@ def run(cmd, cwd=None):
 
 def probe(path):
     out = run(["ffprobe", "-v", "error", "-show_entries",
-               "format=duration:stream=codec_type,width,height,duration", "-of", "json", str(path)])
+               "format=duration:stream=codec_type,width,height,duration", "-of", "json", str(path)], timeout=60)
     try:
         info = json.loads(out or "{}")
     except ValueError:
@@ -113,17 +131,14 @@ def slug(s):
 
 
 # --------------------------------------------------------------- análise de cortes
-def detectar(src, tem_audio, limiar_cena=0.30, silencio_db=-35, silencio_min=0.4):
+def detectar(src, tem_audio, limiar_cena=0.30, silencio_db=-35, silencio_min=0.4, duracao=None):
     """Uma passada do ffmpeg: trocas de cena (vídeo reduzido a 5 fps) e pausas no áudio."""
     cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src), "-map", "0:v:0",
            "-vf", f"fps=5,scale=320:-2,select='gt(scene,{limiar_cena})',showinfo"]
     if tem_audio:
         cmd += ["-map", "0:a:0", "-af", f"silencedetect=n={silencio_db}dB:d={silencio_min}"]
     cmd += ["-f", "null", "-"]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        raise Erro("'ffmpeg' não encontrado. Instale o ffmpeg e coloque no PATH.")
+    r = executar(cmd, timeout=prazo_midia(duracao) if duracao else 3600)
     if r.returncode != 0:
         raise Erro("Falha ao analisar o vídeo: " + " | ".join(r.stderr.strip().splitlines()[-3:]))
     cenas = [float(x) for x in re.findall(r"Parsed_showinfo.*?pts_time:\s*([\d.]+)", r.stderr)]
@@ -243,6 +258,26 @@ def ass_doc(eventos, fonte, maiuscula):
     return head + "\n".join(linhas) + "\n"
 
 
+_fontes = {}
+
+
+def verificar_fonte(fonte):
+    """None se a fonte está instalada; senão, o nome da que o libass usa no lugar (ele troca em silêncio)."""
+    if fonte in _fontes:
+        return _fontes[fonte]
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "f.ass").write_text(ass_doc([(0, 1, "Teste")], fonte, False), encoding="utf-8")
+        r = executar(["ffmpeg", "-hide_banner", "-loglevel", "verbose", "-f", "lavfi", "-i",
+                      "color=s=320x240:d=0.1", "-vf", "ass=f.ass", "-frames:v", "1", "-f", "null", "-"],
+                     cwd=d, timeout=60)
+    m = re.search(r"fontselect: \((.+?), \d+, \d+\) -> ([^,]+),", r.stderr)
+    escolhida = m.group(2).strip() if m else None
+    # Sem a linha de log não dá para saber: não avisa à toa.
+    troca = escolhida if escolhida and _norm(fonte) not in _norm(escolhida) else None
+    _fontes[fonte] = troca
+    return troca
+
+
 def build_ass(texto, dur_fala, fonte, maiuscula, tempos=None):
     return ass_doc(grupos(texto, dur_fala, tempos), fonte, maiuscula)
 
@@ -316,7 +351,8 @@ def transcrever(src, trechos=((0.0, None),)):
             cmd = ["ffmpeg", "-loglevel", "error", "-ss", f"{ini:.3f}"]
             cmd += ["-to", f"{fim:.3f}"] if fim is not None else []
             cmd += ["-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"]
-            r = subprocess.run(cmd, capture_output=True)  # decodifica com o ffmpeg; evita o módulo `av`
+            prazo = prazo_midia(fim - ini) if fim is not None else 3600
+            r = executar(cmd, timeout=prazo, texto=False)  # decodifica com o ffmpeg; evita o módulo `av`
             if r.returncode != 0:
                 raise Erro("Não consegui ler o áudio para transcrever.")
             audio = np.frombuffer(r.stdout, np.float32)
@@ -378,6 +414,82 @@ def chave_transcricao(video_id=None, cortes=None, audio_id=None):
 NOME_SAIDA = re.compile(r"[a-z0-9-]{1,40}_\d{8}-\d{6}(?:_[a-f0-9]{6})?\.mp4")
 
 
+_em_uso = collections.Counter()  # ids de uploads usados por trabalhos em andamento neste processo
+_lock_uso = threading.Lock()
+
+
+@contextlib.contextmanager
+def em_uso(*ids):
+    ids = [i for i in ids if i]
+    with _lock_uso:
+        _em_uso.update(ids)
+    try:
+        yield
+    finally:
+        with _lock_uso:
+            _em_uso.subtract(ids)
+            for i in [k for k, v in _em_uso.items() if v <= 0]:
+                del _em_uso[i]
+
+
+@contextlib.contextmanager
+def pasta_de_trabalho(prefixo=""):
+    """Pasta em tmp/ marcada com o PID do dono (.ativo): a limpeza não mexe nela enquanto ele vive."""
+    work = TMP / f"{prefixo}{uuid.uuid4().hex[:10]}"
+    work.mkdir()
+    (work / ".ativo").write_text(str(os.getpid()), encoding="ascii")
+    try:
+        yield work
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def processo_vivo(pid):
+    if os.name == "nt":  # os.kill no Windows MATA o processo: consulta pela API em vez disso
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        codigo = ctypes.c_ulong()
+        k32.GetExitCodeProcess(h, ctypes.byref(codigo))
+        k32.CloseHandle(h)
+        return codigo.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _tamanho(p):
+    if p.is_file():
+        return p.stat().st_size
+    return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+
+
+def _pasta_ativa(p):
+    try:
+        return p.is_dir() and processo_vivo((p / ".ativo").read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return False
+
+
+def itens_limpeza(alvo, manter=()):
+    """(removíveis, preservados) de uploads/ ou tmp/. Nunca olha saida/."""
+    manter = set(manter) | set(_em_uso)
+    pasta = UP if alvo == "uploads" else TMP
+    rem, pres = [], []
+    for p in pasta.iterdir():
+        if p.name == ".keep":
+            continue
+        guardar = (p.stem in manter) if alvo == "uploads" else _pasta_ativa(p)
+        (pres if guardar else rem).append(p)
+    return rem, pres
+
+
 def nome_saida(nome):
     """Nome único em saida/: slug + data-hora + sufixo aleatório (renders simultâneos não colidem)."""
     base = f"{slug(nome)}_{time.strftime('%Y%m%d-%H%M%S')}"
@@ -415,9 +527,7 @@ def renderizar(job):
     fonte = (job.get("fonte") or "Arial").replace(",", " ")[:40]
     avisos = []
 
-    work = TMP / uuid.uuid4().hex[:10]
-    work.mkdir()
-    try:
+    with em_uso(job.get("video_id"), job.get("audio_id"), job.get("musica_id")), pasta_de_trabalho() as work:
         # Cada clipe: exatamente n quadros e n*SR/FPS amostras (PCM, sem atraso de AAC),
         # começando em 0. Assim a emenda não acumula deriva nem desalinha áudio e vídeo.
         clips = []
@@ -442,12 +552,12 @@ def renderizar(job):
             cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]",
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                     "-c:a", "pcm_s16le", "-ar", str(SR), "-ac", "2", str(clip)]
-            run(cmd)
+            run(cmd, timeout=prazo_midia(dur))
             clips.append(clip)
 
         (work / "lista.txt").write_text("".join(f"file '{c.name}'\n" for c in clips), encoding="utf-8")
         run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", "lista.txt",
-             "-c", "copy", "base.mkv"], cwd=work)
+             "-c", "copy", "base.mkv"], cwd=work, timeout=prazo_midia(len(cortes)))
         d_video = sum(quadros(b - a) for a, b in cortes) / FPS
 
         narr, d_narr = None, 0.0
@@ -488,6 +598,8 @@ def renderizar(job):
                         avisos.append(f"Legenda NÃO gerada ({detalhe}). Clique em 'Transcrever fala' "
                                       "e renderize de novo.")
         legenda = quer_legenda and bool(narr or tempos)
+        if legenda and (troca := verificar_fonte(fonte)):
+            avisos.append(f"A fonte '{fonte}' não está instalada; a legenda saiu com '{troca}'.")
         if legenda:
             sync = sync or ("por_palavra" if tempos else "proporcional")
             (work / "legenda.ass").write_text(
@@ -529,7 +641,7 @@ def renderizar(job):
         cmd += ["-filter_complex", ";".join([fc_v] + fc_a), "-map", "[vout]", "-map", "[aout]",
                 "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                 "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", final.name]
-        run(cmd, cwd=work)
+        run(cmd, cwd=work, timeout=prazo_midia(total))
 
         dur_final = probe(final)["duracao"]
         if dur_final < MIN_ELEGIVEL:
@@ -546,8 +658,6 @@ def renderizar(job):
         salvar_par(final, registro)
         return {"arquivo": final.name, "duracao": dur_final, "aviso": " ".join(avisos), "avisos": avisos,
                 "legenda_sync": registro["legenda_sync"]}
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
 
 
 # --------------------------------------------------------------- rotas
@@ -646,7 +756,8 @@ def rota_transcrever():
     job = corpo_json()
     t0 = time.time()
     if job.get("audio_id"):  # narração enviada
-        texto, tempos = transcrever(achar(job["audio_id"]))
+        with em_uso(job["audio_id"]):
+            texto, tempos = transcrever(achar(job["audio_id"]))
         chave = chave_transcricao(audio_id=job["audio_id"])
     else:  # fala original do vídeo, só nos cortes, na ordem da lista
         src = achar(job.get("video_id"))
@@ -654,7 +765,8 @@ def rota_transcrever():
         if not info["tem_audio"]:
             raise Erro("Esse vídeo não tem áudio para transcrever.")
         cortes = ler_cortes(job.get("cortes"), info["duracao"])
-        texto, tempos = transcrever(src, cortes)
+        with em_uso(job.get("video_id")):
+            texto, tempos = transcrever(src, cortes)
         chave = chave_transcricao(job.get("video_id"), cortes)
     if not tempos:
         raise Erro("Não encontrei fala nesse trecho.")
@@ -670,9 +782,49 @@ def analisar():
     dmin = num(job.get("min"), 1, 600, 15)
     dmax = num(job.get("max"), dmin, 600, max(dmin, 60))
     t0 = time.time()
-    cenas, pausas = detectar(src, info["tem_audio"])
+    with em_uso(job.get("video_id")):
+        cenas, pausas = detectar(src, info["tem_audio"], duracao=info["duracao"])
     return jsonify({"sugestoes": sugerir(info["duracao"], cenas, pausas, dmin, dmax),
                     "cenas": len(cenas), "pausas": len(pausas), "segundos": round(time.time() - t0, 1)})
+
+
+def _ler_manter(lista):
+    return [i for i in (lista or []) if isinstance(i, str) and re.fullmatch(r"[a-f0-9]{12}", i)]
+
+
+def _resumo(itens):
+    return {"arquivos": len(itens), "mb": round(sum(_tamanho(p) for p in itens) / 1e6, 1)}
+
+
+@app.get("/limpeza")
+def ver_limpeza():
+    manter = _ler_manter((request.args.get("manter") or "").split(","))
+    out = {}
+    for alvo in ("uploads", "tmp"):
+        rem, pres = itens_limpeza(alvo, manter)
+        out[alvo] = {"removiveis": _resumo(rem), "preservados": _resumo(pres)}
+    return jsonify(out)
+
+
+@app.post("/limpeza")
+def limpar():
+    """Só quando o usuário pede. Apaga cópias enviadas (uploads/) ou restos de trabalho (tmp/);
+    preserva o que está aberto na tela (`manter`) ou em uso. Nunca toca em saida/."""
+    job = corpo_json()
+    alvo = job.get("alvo")
+    if alvo not in ("uploads", "tmp"):
+        raise Erro("alvo precisa ser 'uploads' ou 'tmp'.")
+    rem, pres = itens_limpeza(alvo, _ler_manter(job.get("manter")))
+    feito, falhas = [], []
+    for p in rem:
+        try:
+            tam = _tamanho(p)
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+            feito.append(tam)
+        except OSError:
+            falhas.append(p.name)  # ex.: arquivo aberto em outro programa no Windows
+    return jsonify({"removidos": len(feito), "mb": round(sum(feito) / 1e6, 1),
+                    "preservados": len(pres), "falhas": falhas})
 
 
 @app.get("/saida/<nome>")

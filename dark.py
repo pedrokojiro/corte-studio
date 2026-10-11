@@ -22,7 +22,6 @@ import re
 import shutil
 import sys
 import time
-import uuid
 from pathlib import Path
 
 import app as A
@@ -182,13 +181,18 @@ def cmd_voz(r, args):
 
 # --------------------------------------------------------------- render
 def filtro_zoom(frames, entrando):
-    """Zoom suave centralizado. A imagem é ampliada 2x antes para reduzir o tremido do zoompan."""
-    passo = f"{ZOOM}*on/{max(frames - 1, 1)}"
-    z = f"1+{passo}" if entrando else f"{1 + ZOOM}-{passo}"
-    return (f"scale={A.W * 2}:{A.H * 2}:force_original_aspect_ratio=increase:flags=lanczos,"
-            f"crop={A.W * 2}:{A.H * 2},setsar=1,"
-            f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={A.W}x{A.H}:fps={A.FPS},"
-            "format=yuv420p")
+    """Zoom suave e centralizado com precisão subpixel (filtro perspective, quadro a quadro).
+
+    Substitui o zoompan, que arredonda o recorte para pixels inteiros e fazia as bordas tremerem:
+    numa borda nítida, 62 de 119 passos andavam para trás (desvio 0,52 px) e agora são 0 (0,10 px).
+    Precisa da imagem em loop como vídeo (-loop 1) com `frames` quadros.
+    """
+    z = f"(1+{ZOOM}*on/{max(frames - 1, 1)})" if entrando else f"({1 + ZOOM}-{ZOOM}*on/{max(frames - 1, 1)})"
+    x0, x1 = f"(W/2-W/(2*{z}))", f"(W/2+W/(2*{z}))"
+    y0, y1 = f"(H/2-H/(2*{z}))", f"(H/2+H/(2*{z}))"
+    return (f"scale={A.W}:{A.H}:force_original_aspect_ratio=increase:flags=lanczos,crop={A.W}:{A.H},setsar=1,"
+            f"perspective=x0='{x0}':y0='{y0}':x1='{x1}':y1='{y0}':x2='{x0}':y2='{y1}':x3='{x1}':y3='{y1}':"
+            "interpolation=cubic:eval=frame,format=yuv420p")
 
 
 def tempos_cena(pasta, i, audio):
@@ -212,9 +216,9 @@ def cmd_render(r, args):
     if trilha and not trilha.exists():
         raise A.Erro(f"Trilha não encontrada: {trilha}")
 
-    work = A.TMP / ("dark_" + uuid.uuid4().hex[:8])
-    work.mkdir()
-    try:
+    if troca := A.verificar_fonte(args.fonte):
+        avisos.append(f"A fonte '{args.fonte}' não está instalada; a legenda vai sair com '{troca}'.")
+    with A.pasta_de_trabalho("dark_") as work:
         clips, sync = [], []
         for i, c in enumerate(cenas):
             img = achar_arquivo(pasta, f"img_{n2(i)}", EXT_IMG)
@@ -226,36 +230,37 @@ def cmd_render(r, args):
             (work / f"l{n2(i)}.ass").write_text(
                 A.ass_doc(A.grupos(c["texto"].strip(), d_aud, tempos), args.fonte, True), encoding="utf-8")
             vf = filtro_zoom(frames, entrando=(i % 2 == 0)) + f",ass=l{n2(i)}.ass"
-            clip = f"c{n2(i)}.mp4"
-            A.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(img), "-i", str(audios[i]),
-                   "-filter_complex", f"[0:v]{vf}[v];[1:a]aresample=44100,apad[a]",
-                   "-map", "[v]", "-map", "[a]", "-t", f"{frames / A.FPS:.3f}",
+            clip = f"c{n2(i)}.mkv"  # PCM: a emenda não acumula o atraso do AAC (mesmo esquema do app)
+            A.run(["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-framerate", str(A.FPS),
+                   "-t", f"{frames / A.FPS:.4f}", "-i", str(img), "-i", str(audios[i]),
+                   "-filter_complex", f"[0:v]{vf},trim=end_frame={frames}[v];"
+                                      f"[1:a]aresample={A.SR},apad,atrim=end_sample={frames * A.SR // A.FPS}[a]",
+                   "-map", "[v]", "-map", "[a]",
                    "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-r", str(A.FPS),
-                   "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2", clip], cwd=work)
+                   "-c:a", "pcm_s16le", "-ar", str(A.SR), "-ac", "2", clip], cwd=work,
+                  timeout=A.prazo_midia(frames / A.FPS))
             clips.append(clip)
             print(f"  cena {n2(i)}: {dur:.1f}s, zoom {'entrada' if i % 2 == 0 else 'saída'}, legenda {sync[-1]}")
 
         (work / "lista.txt").write_text("".join(f"file '{c}'\n" for c in clips), encoding="utf-8")
         A.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", "lista.txt",
-               "-c", "copy", "base.mp4"], cwd=work)
-        total = A.probe(work / "base.mp4")["duracao"]
+               "-c", "copy", "base.mkv"], cwd=work)
+        total = A.probe(work / "base.mkv")["duracao"]
 
         nome = A.nome_saida(r["id"])
-        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "base.mp4"]
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "base.mkv"]
         if trilha:
             cmd += ["-stream_loop", "-1", "-i", str(trilha), "-filter_complex",
-                    f"[1:a]aresample=44100,volume={args.vol_trilha:.3f}[m];"
+                    f"[1:a]aresample={A.SR},volume={args.vol_trilha:.3f}[m];"
                     "[0:a][m]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]",
                     "-map", "0:v", "-map", "[a]"]
         else:
             cmd += ["-map", "0:v", "-map", "0:a"]
         cmd += ["-t", f"{total:.3f}", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
                 "-movflags", "+faststart", f"{nome}.mp4"]
-        A.run(cmd, cwd=work)
+        A.run(cmd, cwd=work, timeout=A.prazo_midia(total))
         A.OUT.mkdir(exist_ok=True)
         shutil.move(str(work / f"{nome}.mp4"), A.OUT / f"{nome}.mp4")
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
 
     final = A.OUT / f"{nome}.mp4"
     dur_final = A.probe(final)["duracao"]
