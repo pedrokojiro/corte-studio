@@ -194,21 +194,94 @@ def test_detectar_cenas_e_pausas_em_video_sintetico(tmp_path):
     assert pausas[0][0] == pytest.approx(5, abs=0.15) and pausas[0][1] == pytest.approx(6.5, abs=0.15)
 
 
-def test_legenda_pela_fala_do_video_com_transcricao(studio, enviar, midia):
-    vid = enviar(midia / "com_audio.mp4")
-    tempos = [[0.2, 0.6, "uma"], [0.7, 1.0, "fala"], [1.1, 1.5, "qualquer"], [1.6, 2.0, "aqui"]]
-    r = A.renderizar({"nome": "t", "video_id": vid, "cortes": [{"ini": 0, "fim": 3}], "narracao": "nenhuma",
-                      "texto": "uma fala qualquer aqui", "tempos": tempos, "legenda": True})
-    reg = json.loads((studio.OUT / r["arquivo"].replace(".mp4", ".json")).read_text(encoding="utf-8"))
-    assert reg["legenda_sync"] == "por_palavra" and r["duracao"] == pytest.approx(3.0, abs=0.15)
+TEMPOS_FALSOS = [[0.2, 0.6, "uma"], [0.7, 1.0, "fala"], [1.1, 1.5, "qualquer"], [1.6, 2.0, "aqui"]]
 
 
-def test_sem_narracao_sem_transcricao_nao_poe_legenda(studio, enviar, midia):
-    vid = enviar(midia / "com_audio.mp4")
-    r = A.renderizar({"nome": "t", "video_id": vid, "cortes": [{"ini": 0, "fim": 1}], "narracao": "nenhuma",
-                      "texto": "texto solto", "tempos": "lixo", "legenda": True})
+def _render_legenda(studio, vid, **extra):
+    job = {"nome": "t", "video_id": vid, "cortes": [{"ini": 0, "fim": 3}], "narracao": "nenhuma",
+           "texto": "uma fala qualquer aqui", "legenda": True, **extra}
+    r = A.renderizar(job)
     reg = json.loads((studio.OUT / r["arquivo"].replace(".mp4", ".json")).read_text(encoding="utf-8"))
+    return r, reg
+
+
+def _chave(vid, cortes=({"ini": 0, "fim": 3},), dur=8.0):
+    return A.chave_transcricao(vid, A.ler_cortes(list(cortes), dur))
+
+
+def test_legenda_pela_fala_do_video_com_transcricao_valida(studio, enviar, midia):
+    vid = enviar(midia / "com_audio.mp4")
+    r, reg = _render_legenda(studio, vid, tempos=TEMPOS_FALSOS, tempos_chave=_chave(vid))
+    assert reg["legenda_sync"] == "por_palavra" and r["duracao"] == pytest.approx(3.0, abs=0.05)
+    assert not any("Legenda" in a for a in r["avisos"])
+
+
+def _transcricao_fixa(monkeypatch, tempos=None, erro=None):
+    chamadas = []
+
+    def falso(src, trechos=((0.0, None),)):
+        chamadas.append(list(trechos))
+        if erro:
+            raise A.Erro(erro)
+        return "x", list(tempos or [])
+    monkeypatch.setattr(A, "transcrever", falso)
+    return chamadas
+
+
+def test_transcricao_velha_e_refeita_com_aviso(studio, enviar, midia, monkeypatch):
+    vid = enviar(midia / "com_audio.mp4")
+    chamadas = _transcricao_fixa(monkeypatch, tempos=[(0.1, 0.4, "uma"), (0.5, 0.9, "fala")])
+    velha = _chave(vid, [{"ini": 0, "fim": 2}])  # transcrita com outro corte
+    r, reg = _render_legenda(studio, vid, tempos=TEMPOS_FALSOS, tempos_chave=velha)
+    assert chamadas == [[(0.0, 3.0)]]                      # retranscreveu os cortes atuais
+    assert reg["legenda_sync"] == "por_palavra_retranscrita"
+    assert any("Legenda sincronizada de novo" in a and "outro corte" in a for a in r["avisos"])
+
+
+def test_sem_transcricao_e_sem_fala_avisa_que_nao_gerou(studio, enviar, midia, monkeypatch):
+    vid = enviar(midia / "com_audio.mp4")
+    _transcricao_fixa(monkeypatch, tempos=[])               # nada de fala nos cortes
+    r, reg = _render_legenda(studio, vid, tempos="lixo")
     assert reg["legenda_sync"] is None
+    assert any(a.startswith("Legenda NÃO gerada") and "Transcrever fala" in a for a in r["avisos"])
+
+
+def test_transcricao_indisponivel_avisa_e_nao_some_em_silencio(studio, enviar, midia, monkeypatch):
+    vid = enviar(midia / "com_audio.mp4")
+    _transcricao_fixa(monkeypatch, erro="Transcrição não instalada.")
+    r, reg = _render_legenda(studio, vid)
+    assert reg["legenda_sync"] is None
+    assert any("Legenda NÃO gerada" in a and "não instalada" in a for a in r["avisos"])
+
+
+def test_narracao_enviada_sem_transcricao_cai_no_proporcional_com_aviso(studio, enviar, midia, monkeypatch):
+    vid = enviar(midia / "com_audio.mp4")
+    aud = enviar(midia / "narr9.mp3")
+    _transcricao_fixa(monkeypatch, erro="sem modelo")
+    r = A.renderizar({"nome": "t", "video_id": vid, "cortes": [{"ini": 0, "fim": 2}], "narracao": "arquivo",
+                      "audio_id": aud, "texto": "um dois tres", "legenda": True})
+    assert r["legenda_sync"] == "proporcional"
+    assert any("proporcional" in a for a in r["avisos"])
+
+
+def test_legenda_marcada_com_texto_vazio_avisa(studio, enviar, midia):
+    vid = enviar(midia / "com_audio.mp4")
+    r = A.renderizar({"nome": "t", "video_id": vid, "cortes": [{"ini": 0, "fim": 1}], "texto": "", "legenda": True})
+    assert any("texto está vazio" in a for a in r["avisos"])
+
+
+def test_transcrever_devolve_chave_dos_cortes_atuais(studio, enviar, midia, monkeypatch):
+    vid = enviar(midia / "com_audio.mp4")
+    _transcricao_fixa(monkeypatch, tempos=[(0.1, 0.2, "a")])
+    cortes = [{"ini": 0.37, "fim": 1.71}]
+    j = studio.app.test_client().post("/transcrever", json={"video_id": vid, "cortes": cortes}).get_json()
+    assert j["chave"] == _chave(vid, cortes)
+
+
+def test_cortes_alinhados_a_grade_de_quadros():
+    assert A.ler_cortes([{"ini": 0.37, "fim": 1.71}], 8.0) == [(11 / 30, 51 / 30)]
+    assert A.ler_cortes([{"ini": 7.0, "fim": 99}], 8.0) == [(7.0, 8.0)]     # não passa do último quadro
+    assert A.linha_do_tempo([(11 / 30, 51 / 30), (2.0, 3.0)]) == [0.0, 40 / 30]
 
 
 def test_transcrever_video_sem_audio_da_erro(studio, enviar, midia):

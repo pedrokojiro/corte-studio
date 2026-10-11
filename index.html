@@ -108,6 +108,7 @@
       <div id="boxTrans" class="row" style="margin-bottom:6px"><button id="bTrans">Transcrever fala</button><span id="transInfo" class="mut" style="flex:3"></span></div>
       <textarea id="texto" placeholder="Escreva a narração original. Gancho nos primeiros 3 segundos."></textarea>
       <div class="mut" id="estim"></div>
+      <div id="legEstado" style="font-size:12px;margin-top:4px"></div>
     </div>
     <div class="row">
       <label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="leg" checked> Legenda</label>
@@ -177,7 +178,7 @@ $('bAdd').onclick = () => {
   S.cortes.push({ini, fim}); renderTab(); msg('');
 };
 function renderTab(){
-  if(S.tempos && S.tempSrc === 'video' && S.tempKey !== JSON.stringify(S.cortes)){ S.tempos = null; $('transInfo').innerHTML = '<span class="warn">Os cortes mudaram: clique em Transcrever de novo.</span>'; }
+  estadoLegenda();
   const tb = $('tab').querySelector('tbody'); tb.innerHTML = '';
   S.cortes.forEach((c, i) => {
     const tr = document.createElement('tr');
@@ -237,12 +238,42 @@ $('modo').onchange = () => {
     m === 'arquivo' ? 'Legenda: clique em Transcrever (lê o seu áudio) e corrija o que estiver errado' :
     'Legenda: adicione os cortes, clique em Transcrever e corrija o que estiver errado';
   $('texto').placeholder = m === 'ia' ? 'Escreva a narração original. Gancho nos primeiros 3 segundos.' : 'O texto transcrito aparece aqui. Deixe vazio para não ter legenda.';
-  if(S.tempos && S.tempSrc !== (m === 'arquivo' ? 'narr' : 'video')){ S.tempos = null; $('transInfo').textContent = ''; }
+  estadoLegenda();
   $('vo').value = m === 'nenhuma' ? 100 : 12; $('tvo').textContent = $('vo').value + '%';
 };
 $('taxa').oninput = () => $('txv').textContent = ($('taxa').value >= 0 ? '+' : '') + $('taxa').value + '%';
 $('vo').oninput = () => $('tvo').textContent = $('vo').value + '%';
 $('vm').oninput = () => $('tvm').textContent = $('vm').value + '%';
+const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// De onde a transcrição atual teria de vir: os cortes do vídeo (sem narração) ou o áudio enviado.
+function fonteAtual(){
+  const m = $('modo').value;
+  if(m === 'arquivo') return 'a:' + (S.narr ? S.narr.id : '');
+  return 'v:' + (S.video ? S.video.id : '') + ':' + JSON.stringify(S.cortes.map(c => [c.ini, c.fim]));
+}
+// Mostra, antes do render, o que vai acontecer com a legenda.
+function estadoLegenda(){
+  const m = $('modo').value, el = $('legEstado');
+  if(m === 'ia' || !$('leg').checked){ el.innerHTML = ''; return; }
+  const temTexto = $('texto').value.trim().length > 0;
+  let cls = 'warn', t;
+  if(S.tempos && S.tempFonte === fonteAtual()){
+    cls = 'ok'; t = temTexto ? 'Legenda: sincronizada por palavra com ' + (m === 'arquivo' ? 'o áudio enviado.' : 'os cortes atuais.')
+                             : 'Legenda: o texto está vazio, o vídeo sairá sem legenda.';
+    if(!temTexto) cls = 'warn';
+  } else if(S.tempos){
+    t = 'Legenda desatualizada: ' + (m === 'arquivo' ? 'o áudio mudou' : 'os cortes mudaram') +
+        ' depois da transcrição. Ao renderizar, o app transcreve de novo e encaixa o seu texto (ou clique em Transcrever fala).';
+  } else if(!temTexto){
+    t = 'Sem texto: o vídeo sairá sem legenda. Clique em Transcrever fala para gerar.';
+  } else if(m === 'arquivo'){
+    t = 'Sem transcrição: ao renderizar, o app tenta transcrever o áudio; se não conseguir, a legenda sai proporcional ao texto.';
+  } else {
+    t = 'Sem transcrição: ao renderizar, o app transcreve a fala dos cortes automaticamente.';
+  }
+  el.innerHTML = `<span class="${cls}">${t}</span>`;
+}
+$('leg').addEventListener('change', estadoLegenda);
 $('bTrans').onclick = async () => {
   const m = $('modo').value;
   if(!S.video) return msg('Envie um vídeo primeiro.', 'warn');
@@ -255,19 +286,20 @@ $('bTrans').onclick = async () => {
     const r = await fetch('/transcrever', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const j = await r.json(); if(!r.ok) throw new Error(j.erro || 'Falha na transcrição');
     $('texto').value = j.texto; $('texto').oninput();
-    S.tempos = j.tempos; S.tempSrc = m === 'arquivo' ? 'narr' : 'video'; S.tempKey = JSON.stringify(S.cortes);
+    S.tempos = j.tempos; S.tempChave = j.chave; S.tempFonte = fonteAtual(); estadoLegenda();
     $('transInfo').innerHTML = `<span class="ok">Transcrito em ${j.segundos}s. Corrija o texto à vontade: a legenda continua sincronizada.</span>`;
   }catch(err){ $('transInfo').innerHTML = `<span class="bad">${err.message}</span>`; }
   $('bTrans').disabled = false;
 };
 $('texto').oninput = () => {
+  estadoLegenda();
   if($('modo').value !== 'ia'){ $('estim').textContent = ''; return; }
   const n = $('texto').value.length;
   $('estim').textContent = n ? `${n} caracteres, cerca de ${(n/15).toFixed(0)}s de fala [ESTIMATIVA]` : '';
 };
 $('narrArq').onchange = async e => {
   const f = e.target.files[0]; if(!f) return;
-  try{ S.narr = await envia(f); if(S.tempSrc === 'narr') S.tempos = null; $('narrInfo').textContent = `${S.narr.nome} | ${fmt(S.narr.duracao)}`; }
+  try{ S.narr = await envia(f); estadoLegenda(); $('narrInfo').textContent = `${S.narr.nome} | ${fmt(S.narr.duracao)}`; }
   catch(err){ msg(err.message, 'bad'); }
 };
 $('musArq').onchange = async e => {
@@ -284,7 +316,7 @@ $('go').onclick = async () => {
     video_id: S.video.id, nome: S.video.nome.replace(/\.[^.]+$/, ''), nome_original: S.video.nome,
     cortes: S.cortes, crop_x: parseFloat($('cx').value),
     narracao: modo, texto: $('texto').value, voz: $('voz').value, taxa: ($('taxa').value >= 0 ? '+' : '') + $('taxa').value + '%',
-    audio_id: S.narr && S.narr.id, tempos: modo !== 'ia' ? S.tempos : null, legenda: $('leg').checked, maiuscula: $('mai').checked,
+    audio_id: S.narr && S.narr.id, tempos: modo !== 'ia' ? S.tempos : null, tempos_chave: S.tempChave || null, legenda: $('leg').checked, maiuscula: $('mai').checked,
     volume_original: $('vo').value / 100, musica_id: S.mus && S.mus.id, volume_musica: $('vm').value / 100
   };
   $('go').disabled = true; $('result').innerHTML = '';
@@ -293,7 +325,7 @@ $('go').onclick = async () => {
     const r = await fetch('/render', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const j = await r.json();
     if(!r.ok) throw new Error(j.erro || 'Falha no render');
-    msg(`Pronto: ${j.duracao.toFixed(1)}s. ` + (j.aviso ? `<span class="warn">${j.aviso}</span>` : ''), 'ok');
+    msg(`Pronto: ${j.duracao.toFixed(1)}s.` + (j.avisos || []).map(a => `<br><span class="warn">⚠ ${esc(a)}</span>`).join(''), 'ok');
     $('result').innerHTML = `<video controls src="/saida/${j.arquivo}"></video>
       <p><a href="/saida/${j.arquivo}?dl=1" style="color:var(--acc)">Baixar ${j.arquivo}</a><br>
       <span class="mut">Também salvo na pasta "saida" do app, com um registro .json.</span></p>`;

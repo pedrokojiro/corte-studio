@@ -53,7 +53,8 @@ Saída: MP4 1080x1920, 30 fps, H.264 + AAC, com zoom suave alternando entrada e 
 ## Voz e legenda
 - A voz "gerar com IA" usa o edge-tts, um acesso não oficial ao serviço de leitura do Microsoft Edge, que pode mudar ou parar. Plano B, já pronto: gere a voz em outra ferramenta e use "Enviar áudio" (app) ou salve como `audio_XX.mp3` (pipeline).
 - **Transcrição**: faster-whisper, modelo `small`, roda local na CPU. Baixa ~480 MB na 1a vez. Medido nesta máquina (i7-4790): 58s de fala transcritos em 28s [DADO, 1 medição]. Erra às vezes (ex.: "15 %" em vez de "85 %" no começo de um corte), por isso o texto fica editável. Cada corte é transcrito separado, porque, emendados, o Whisper pulou fala repetida.
-- **Sincronia**: com edge-tts ou com a transcrição, a legenda usa o tempo real de cada palavra. Se você corrigir o texto, as palavras são casadas com as transcritas e mantêm o tempo. Sem transcrição, com áudio enviado, cai no método antigo, que divide o tempo pelo tamanho do texto. O registro `.json` diz qual foi usado (`legenda_sync`).
+- **Sincronia**: com edge-tts ou com a transcrição (da fala do vídeo ou do áudio enviado), a legenda usa o tempo real de cada palavra. Se você corrigir o texto, as palavras são casadas com as transcritas e mantêm o tempo. Se a transcrição ficou velha (os cortes ou o áudio mudaram) ou não foi feita, o render transcreve de novo e avisa; se não conseguir, avisa que a legenda não saiu (sem narração) ou que saiu proporcional ao texto (áudio enviado). Nunca some em silêncio. O registro `.json` diz qual foi usado (`legenda_sync`) e guarda os avisos.
+- **Linha do tempo**: os cortes são alinhados à grade de quadros (1/30 s) e cada trecho tem exatamente N quadros e N×1470 amostras, por isso a transcrição e o vídeo final usam a mesma base de tempo. Medição com 6 cortes irregulares (bipe e flash por corte, `tests/test_linha_do_tempo.py`): antes, deriva de até +211 ms no áudio, +267 ms no vídeo e áudio/vídeo desalinhados em até 81 ms; depois, 0 ms e 0 quadro em todas as fronteiras [DADO, 2026-10-11]. O erro do reconhecimento de fala é separado: Whisper x WordBoundary, média de 51 ms e máximo de 186 ms (`tests/medir_sync.py`).
 - Medição (`python tests/medir_sync.py`, 54,7s de fala, 39 grupos):
 
   | | média | mediana | máx |
@@ -85,5 +86,4 @@ São 47 testes: transcrição real (pulada sem internet ou sem modelo), alinhame
 - Vídeos longos (mais de 10 min) ou 4K como fonte; tempo de render em máquina mais fraca.
 - Fontes que não sejam Arial (`--fonte` e o campo `fonte` do app).
 - Comportamento do edge-tts com texto muito longo (mais de alguns minutos) ou com bloqueio do serviço.
-- Alinhamento local (faster-whisper) para áudio enviado: não foi implementado, porque o WordBoundary funcionou e a tarefa pedia isso só como alternativa.
 - No Anaconda, o app liga `KMP_DUPLICATE_LIB_OK=TRUE` antes de carregar o Whisper (conflito de OpenMP entre o numpy e o ctranslate2). É o contorno conhecido para esse caso. Funcionou nos testes, mas a própria Intel o chama de "não suportado".

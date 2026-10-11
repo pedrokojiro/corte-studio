@@ -51,7 +51,16 @@ def main():
     print(f"fala {dur:.1f}s | {len(TEXTO)} caracteres ({len(TEXTO) / dur:.1f} car/s) | "
           f"{len(tempos)} palavras com tempo | {len(prop)} grupos | {len(refs)} retomadas de fala")
     # DEPOIS = início real de cada grupo; o erro dele é o da linha "WordBoundary x silêncio".
-    for nome, e in (("WordBoundary x silêncio", wb), ("ANTES por grupo x real", antes)):
+    linhas = [("WordBoundary x silêncio", wb), ("ANTES por grupo x real", antes)]
+    # 3) Erro do RECONHECIMENTO (Whisper) isolado: mesmo áudio, sem cortes, contra o WordBoundary.
+    #    A deriva da LINHA DO TEMPO entre cortes é medida à parte em tests/test_linha_do_tempo.py.
+    try:
+        _, whisper = A.transcrever(mp3)
+        ref = A.alinhar([w for _, _, w in whisper], tempos)
+        linhas.append(("Whisper x WordBoundary", [abs(a[0] - b[0]) for a, b in zip(whisper, ref)]))
+    except A.Erro as e:
+        print(f"(Whisper indisponível: {e})")
+    for nome, e in linhas:
         print(f"{nome:24s} média {statistics.mean(e) * 1000:5.0f} ms | mediana "
               f"{statistics.median(e) * 1000:5.0f} ms | máx {max(e) * 1000:5.0f} ms")
 

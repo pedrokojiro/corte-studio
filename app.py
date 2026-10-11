@@ -32,6 +32,7 @@ app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 ** 3
 
 W, H, FPS = 1080, 1920, 30
+SR = 44100  # taxa de amostragem do áudio de trabalho
 MIN_ELEGIVEL = 61.0  # Creator Rewards: vídeo acima de 1 minuto [DADO, fonte secundária]
 ORIGENS = {"dominio_publico", "proprio", "licenciado"}
 EXT_OK = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
@@ -263,7 +264,10 @@ _modelo, _lock_modelo = None, threading.Lock()
 
 
 def transcrever(src, trechos=((0.0, None),)):
-    """Transcreve a fala (PT-BR) dos trechos, emendados na ordem: (texto, [(ini_s, fim_s, palavra)])."""
+    """Transcreve a fala (PT-BR) dos trechos, emendados na ordem: (texto, [(ini_s, fim_s, palavra)]).
+
+    Os tempos ficam na linha do tempo do vídeo final (`linha_do_tempo`), não na soma nominal.
+    """
     # Anaconda: numpy (MKL) e ctranslate2 trazem cada um sua cópia do OpenMP e o processo aborta sem isto.
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
     try:
@@ -280,8 +284,13 @@ def transcrever(src, trechos=((0.0, None),)):
             raise Erro(f"Não consegui carregar o modelo de transcrição ({type(e).__name__}). Na 1a vez "
                        "ele é baixado da internet (~480 MB).")
         # Um trecho por vez: emendados, o Whisper chega a pular fala repetida entre cortes.
-        tempos, offset = [], 0.0
-        for ini, fim in trechos:
+        tempos = []
+        cortados = [t for t in trechos if t[1] is not None]
+        inicios = linha_do_tempo(cortados) if len(cortados) == len(trechos) else None
+        offset = 0.0
+        for k, (ini, fim) in enumerate(trechos):
+            if inicios is not None:
+                offset = inicios[k]
             cmd = ["ffmpeg", "-loglevel", "error", "-ss", f"{ini:.3f}"]
             cmd += ["-to", f"{fim:.3f}"] if fim is not None else []
             cmd += ["-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"]
@@ -291,9 +300,10 @@ def transcrever(src, trechos=((0.0, None),)):
             audio = np.frombuffer(r.stdout, np.float32)
             if audio.size >= 16000 * 0.3:
                 segs, _ = _modelo.transcribe(audio, language="pt", word_timestamps=True, vad_filter=True)
-                tempos += [(round(offset + float(w.start), 2), round(offset + float(w.end), 2), w.word.strip())
+                tempos += [(round(offset + float(w.start), 3), round(offset + float(w.end), 3), w.word.strip())
                            for s in segs for w in (s.words or []) if w.word.strip()]
-            offset += (fim - ini) if fim is not None else audio.size / 16000
+            if inicios is None:
+                offset += audio.size / 16000
     return " ".join(w for _, _, w in tempos), tempos
 
 
@@ -306,16 +316,53 @@ def ler_tempos(v):
     return t if all(x[0] <= x[1] for x in t) else []
 
 
+def quadros(t):
+    """Segundos -> número inteiro de quadros (grade de 1/FPS)."""
+    return int(round(t * FPS))
+
+
 def ler_cortes(lista, duracao):
+    """Cortes válidos, alinhados à grade de quadros: a mesma base de tempo no render e na transcrição."""
+    ultimo = math.floor(duracao * FPS + 1e-6)
     cortes = []
     for c in lista or []:
-        ini = num(c.get("ini"), 0, duracao, 0)
-        fim = num(c.get("fim"), 0, duracao, 0)
-        if fim - ini >= 0.3:
-            cortes.append((ini, fim))
+        if not isinstance(c, dict):
+            continue
+        a = quadros(num(c.get("ini"), 0, duracao, 0))
+        b = min(quadros(num(c.get("fim"), 0, duracao, 0)), ultimo)
+        if (b - a) / FPS >= 0.3:
+            cortes.append((a / FPS, b / FPS))
     if not cortes:
         raise Erro("Adicione pelo menos um corte (fim maior que o início).")
     return cortes
+
+
+def linha_do_tempo(cortes):
+    """Início de cada corte no vídeo final (s). Cada clipe tem exatamente round(dur*FPS) quadros."""
+    inicios, n = [], 0
+    for a, b in cortes:
+        inicios.append(n / FPS)
+        n += quadros(b - a)
+    return inicios
+
+
+def chave_transcricao(video_id=None, cortes=None, audio_id=None):
+    """Identifica de onde veio uma transcrição; se mudar, o tempo das palavras ficou velho."""
+    if audio_id:
+        return f"a:{audio_id}"
+    return f"v:{video_id}:" + ";".join(f"{quadros(a)}-{quadros(b)}" for a, b in cortes)
+
+
+def nome_saida(nome):
+    return f"{slug(nome)}_{time.strftime('%Y%m%d-%H%M%S')}"
+
+
+def salvar_par(mp4_tmp, registro):
+    """Move o vídeo para saida/ e grava o .json com o mesmo nome."""
+    destino = OUT / mp4_tmp.name
+    shutil.move(str(mp4_tmp), destino)
+    destino.with_suffix(".json").write_text(json.dumps(registro, ensure_ascii=False, indent=2), encoding="utf-8")
+    return destino
 
 
 # --------------------------------------------------------------- render
@@ -336,64 +383,105 @@ def renderizar(job):
     vol_orig = num(job.get("volume_original"), 0, 1, 0.12 if narrando else 1.0)
     vol_musica = num(job.get("volume_musica"), 0, 1, 0.10)
     fonte = (job.get("fonte") or "Arial").replace(",", " ")[:40]
+    avisos = []
 
     work = TMP / uuid.uuid4().hex[:10]
     work.mkdir()
     try:
+        # Cada clipe: exatamente n quadros e n*SR/FPS amostras (PCM, sem atraso de AAC),
+        # começando em 0. Assim a emenda não acumula deriva nem desalinha áudio e vídeo.
         clips = []
         for i, (ini, fim) in enumerate(cortes):
-            clip = work / f"c{i:02d}.mp4"
-            vf = (f"crop=w='min(iw,ih*9/16)':h=ih:x='(iw-ow)*{cx:.4f}':y=0,"
-                  f"scale={W}:{H}:flags=lanczos,setsar=1,fps={FPS},format=yuv420p")
-            cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{ini:.3f}", "-to", f"{fim:.3f}", "-i", str(src)]
+            n = quadros(fim - ini)
+            dur = n / FPS
+            # Busca meio quadro antes: o quadro exato de `ini` não pode cair antes do ponto de busca
+            # por arredondamento. O áudio descarta esse meio quadro e começa na amostra de `ini`.
+            folga = min(ini, 0.5 / FPS)
+            clip = work / f"c{i:02d}.mkv"
+            cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{ini - folga:.6f}", "-t", f"{dur + 0.5:.4f}",
+                   "-i", str(src)]
             if not info["tem_audio"]:
-                cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
-            cmd += ["-vf", vf, "-map", "0:v:0"]
-            cmd += ["-map", "0:a:0"] if info["tem_audio"] else ["-map", "1:a:0", "-shortest"]
-            cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                    "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2", str(clip)]
+                cmd += ["-f", "lavfi", "-t", f"{dur + 0.5:.4f}", "-i", f"anullsrc=r={SR}:cl=stereo"]
+            fa = "0:a:0" if info["tem_audio"] else "1:a:0"
+            corta_a = round(folga * SR) if info["tem_audio"] else 0
+            fc = (f"[0:v:0]setpts=PTS-STARTPTS,crop=w='min(iw,ih*9/16)':h=ih:x='(iw-ow)*{cx:.4f}':y=0,"
+                  f"scale={W}:{H}:flags=lanczos,setsar=1,fps={FPS},tpad=stop_mode=clone:stop_duration=1,"
+                  f"trim=end_frame={n},format=yuv420p[v];"
+                  f"[{fa}]aresample={SR},asetpts=PTS-STARTPTS,atrim=start_sample={corta_a},asetpts=PTS-STARTPTS,"
+                  f"apad,atrim=end_sample={round(dur * SR)}[a]")
+            cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                    "-c:a", "pcm_s16le", "-ar", str(SR), "-ac", "2", str(clip)]
             run(cmd)
             clips.append(clip)
 
         (work / "lista.txt").write_text("".join(f"file '{c.name}'\n" for c in clips), encoding="utf-8")
         run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", "lista.txt",
-             "-c", "copy", "base.mp4"], cwd=work)
-        d_video = probe(work / "base.mp4")["duracao"]
+             "-c", "copy", "base.mkv"], cwd=work)
+        d_video = sum(quadros(b - a) for a, b in cortes) / FPS
 
         narr, d_narr = None, 0.0
-        tempos = ler_tempos(job.get("tempos"))  # da transcrição (fala do vídeo ou do áudio enviado)
+        tempos, sync = [], None
+        quer_legenda = bool(job.get("legenda")) and bool(texto)
+        tempos_cli = ler_tempos(job.get("tempos"))
         if modo == "ia":
             narr = work / "narracao.mp3"
             tempos = gerar_voz(texto, job.get("voz") or "pt-BR-AntonioNeural", job.get("taxa") or "-5%", narr)
         elif modo == "arquivo":
             narr = achar(job.get("audio_id"))
+            chave = chave_transcricao(audio_id=job.get("audio_id"))
+        else:
+            chave = chave_transcricao(job.get("video_id"), cortes)
         if narr:
             d_narr = probe(narr)["duracao"]
 
-        total = max(d_video, d_narr + 0.4) if narr else d_video
-        extra = max(0.0, total - d_video)
-
-        musica = achar(job["musica_id"]) if job.get("musica_id") else None
-
-        # Sem narração, a legenda acompanha a fala do próprio vídeo (precisa da transcrição).
-        legenda = bool(job.get("legenda")) and bool(texto) and bool(narr or tempos)
+        if quer_legenda and modo != "ia":
+            if tempos_cli and job.get("tempos_chave") == chave:
+                tempos = tempos_cli
+            else:
+                motivo = ("a transcrição era de outro corte ou áudio" if tempos_cli
+                          else "o texto não foi transcrito")
+                try:  # refaz a transcrição da fonte atual e casa com o texto (que pode ter sido editado)
+                    trechos = [(0.0, None)] if modo == "arquivo" else cortes
+                    _, tempos = transcrever(narr if modo == "arquivo" else src, trechos)
+                    if not tempos:
+                        raise Erro("não encontrei fala")
+                    sync = "por_palavra_retranscrita"
+                    avisos.append(f"Legenda sincronizada de novo ({motivo}). Confira se o texto ainda "
+                                  "corresponde à fala.")
+                except Erro as e:
+                    tempos = []
+                    detalhe = f"{motivo}; não deu para transcrever agora: {e}"
+                    if modo == "arquivo":
+                        avisos.append(f"Legenda proporcional ao texto, sem tempo por palavra ({detalhe}).")
+                    else:
+                        avisos.append(f"Legenda NÃO gerada ({detalhe}). Clique em 'Transcrever fala' "
+                                      "e renderize de novo.")
+        legenda = quer_legenda and bool(narr or tempos)
         if legenda:
+            sync = sync or ("por_palavra" if tempos else "proporcional")
             (work / "legenda.ass").write_text(
                 build_ass(texto, d_narr if narr else d_video, fonte, bool(job.get("maiuscula", True)), tempos),
                 encoding="utf-8")
+        elif bool(job.get("legenda")) and not texto and modo != "ia":
+            avisos.append("Legenda marcada, mas o texto está vazio: o vídeo saiu sem legenda.")
 
-        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "base.mp4"]
+        total = max(d_video, d_narr + 0.4) if narr else d_video
+        extra = max(0.0, total - d_video)
+        musica = achar(job["musica_id"]) if job.get("musica_id") else None
+
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "base.mkv"]
         idx = 1
         labels = ["[a0]"]
         fc_a = [f"[0:a]volume={vol_orig:.3f},apad[a0]"]
         if narr:
             cmd += ["-i", str(narr)]
-            fc_a.append(f"[{idx}:a]aresample=44100,apad[a{idx}]")
+            fc_a.append(f"[{idx}:a]aresample={SR},apad[a{idx}]")
             labels.append(f"[a{idx}]")
             idx += 1
         if musica:
             cmd += ["-stream_loop", "-1", "-i", str(musica)]
-            fc_a.append(f"[{idx}:a]aresample=44100,volume={vol_musica:.3f}[a{idx}]")
+            fc_a.append(f"[{idx}:a]aresample={SR},volume={vol_musica:.3f}[a{idx}]")
             labels.append(f"[a{idx}]")
             idx += 1
         n = len(labels)
@@ -406,30 +494,28 @@ def renderizar(job):
             vchain.append("ass=legenda.ass")
         fc_v = "[0:v]" + (",".join(vchain) if vchain else "null") + "[vout]"
 
-        nome = f"{slug(job.get('nome'))}_{time.strftime('%Y%m%d-%H%M%S')}"
+        nome = nome_saida(job.get("nome"))
         final = work / f"{nome}.mp4"
         cmd += ["-filter_complex", ";".join([fc_v] + fc_a), "-map", "[vout]", "-map", "[aout]",
                 "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                 "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", final.name]
         run(cmd, cwd=work)
 
-        shutil.move(str(final), OUT / final.name)
-        dur_final = probe(OUT / final.name)["duracao"]
+        dur_final = probe(final)["duracao"]
+        if dur_final < MIN_ELEGIVEL:
+            avisos.insert(0, f"{dur_final:.0f}s: abaixo de 1 minuto, não conta para o Creator Rewards "
+                             "[DADO, fonte secundária].")
         registro = {
             "arquivo": final.name, "criado_em": time.strftime("%Y-%m-%d %H:%M:%S"),
             "origem_declarada": origem, "prova_declarada": prova,
             "video_fonte": job.get("nome_original"), "cortes": cortes,
-            "narracao": modo,
-            "legenda_sync": ("por_palavra" if tempos else "proporcional") if legenda else None,
-            "duracao_s": round(dur_final, 2),
+            "narracao": modo, "legenda_sync": sync if legenda else None,
+            "duracao_s": round(dur_final, 2), "avisos": avisos,
             "aviso": "Origem opcional, autodeclarada pelo usuário. O app não verifica status legal.",
         }
-        (OUT / f"{nome}.json").write_text(json.dumps(registro, ensure_ascii=False, indent=2), encoding="utf-8")
-        aviso = ""
-        if dur_final < MIN_ELEGIVEL:
-            aviso = (f"{dur_final:.0f}s: abaixo de 1 minuto, não conta para o Creator Rewards "
-                     "[DADO, fonte secundária].")
-        return {"arquivo": final.name, "duracao": dur_final, "aviso": aviso}
+        salvar_par(final, registro)
+        return {"arquivo": final.name, "duracao": dur_final, "aviso": " ".join(avisos), "avisos": avisos,
+                "legenda_sync": registro["legenda_sync"]}
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -483,15 +569,19 @@ def rota_transcrever():
     t0 = time.time()
     if job.get("audio_id"):  # narração enviada
         texto, tempos = transcrever(achar(job["audio_id"]))
+        chave = chave_transcricao(audio_id=job["audio_id"])
     else:  # fala original do vídeo, só nos cortes, na ordem da lista
         src = achar(job.get("video_id"))
         info = probe(src)
         if not info["tem_audio"]:
             raise Erro("Esse vídeo não tem áudio para transcrever.")
-        texto, tempos = transcrever(src, ler_cortes(job.get("cortes"), info["duracao"]))
+        cortes = ler_cortes(job.get("cortes"), info["duracao"])
+        texto, tempos = transcrever(src, cortes)
+        chave = chave_transcricao(job.get("video_id"), cortes)
     if not tempos:
         raise Erro("Não encontrei fala nesse trecho.")
-    return jsonify({"texto": texto, "tempos": tempos, "segundos": round(time.time() - t0, 1)})
+    # `chave` volta no /render como `tempos_chave`: se não bater, a transcrição está velha.
+    return jsonify({"texto": texto, "tempos": tempos, "chave": chave, "segundos": round(time.time() - t0, 1)})
 
 
 @app.post("/analisar")
