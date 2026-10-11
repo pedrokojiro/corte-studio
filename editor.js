@@ -439,6 +439,204 @@ function tudo() {
   if (window.desenharGanchos) window.desenharGanchos();
 }
 
+// ================================================================ ganchos (fala real x título derivado)
+async function aplicarOp(op, comoVersao, nome) {
+  const j = await api('/api/operacao', {json: {plano: plano(), operacao: op}});
+  if (comoVersao) novaVersao(nome, comoVersao, p => { Object.keys(p).forEach(k => delete p[k]); Object.assign(p, j.plano); });
+  else mudar(() => { st.versoes[st.ativa].plano = j.plano; });
+}
+async function previaCom(op) {
+  try {
+    const j = await api('/api/operacao', {json: {plano: plano(), operacao: op}});
+    const r = await renderizar('previa', j.plano, $('tarefa'));
+    $('previaBox').innerHTML = blocoVideo(r, 'Prévia com a sugestão (nada foi aplicado ainda)');
+  } catch (e) { msg(esc(e.message), 'bad'); }
+}
+function desenharGanchos() {
+  const g = st.ganchos; if (!g) return;
+  const est = st.estadoSug || {};
+  const falados = g.falados.length ? g.falados.map((c, i) => `<div class="sug ${est[c.id] || ''}" data-g="${i}">
+      <div class="row"><span class="tag fala">fala real</span><span class="mut">${esc(plano().fontes[c.fonte]?.nome || '')} · ${fmt(c.ini)}–${fmt(c.fim)}</span></div>
+      <div style="margin:4px 0">“${esc(c.texto)}”</div>
+      <div class="mut">Por quê: ${esc(c.motivos.join('; ') || 'sem sinais fortes')}</div>
+      <div class="row" style="margin-top:4px"><label class="mut" style="margin:0">Trecho:</label>
+        <input type="number" step="0.1" value="${c.ini}" data-c="ini" aria-label="início do gancho"> a
+        <input type="number" step="0.1" value="${c.fim}" data-c="fim" aria-label="fim do gancho"> s</div>
+      <div class="row" style="margin-top:4px"><button class="mini" data-a="ouvir">▶ ouvir</button><button class="mini" data-a="previa">Prévia</button>
+        <button class="mini" data-a="aplicar">Abrir o vídeo com ele</button><button class="mini" data-a="versao">Criar versão</button>
+        <button class="mini" data-a="rejeitar">Rejeitar</button></div></div>`).join('')
+    : '<div class="mut">Nenhuma frase candidata (fala curta ou sem pontuação).</div>';
+  const titulos = g.titulos.length ? g.titulos.map((t, i) => `<div class="sug ${est[t.id] || ''}" data-t="${i}">
+      <div class="row"><span class="tag loc">título sugerido</span><span class="mut">${esc(t.nota)}</span></div>
+      <input type="text" value="${esc(t.texto)}" maxlength="90" style="width:100%;margin:4px 0" aria-label="Texto do título sugerido">
+      <div class="row"><button class="mini" data-a="aplicar">Usar como título (0–3s)</button><button class="mini" data-a="versao">Criar versão</button>
+        <button class="mini" data-a="rejeitar">Rejeitar</button></div></div>`).join('')
+    : '<div class="mut">Sem título derivado.</div>';
+  $('ganchos').innerHTML = `<div class="mut" style="margin:6px 0">${esc(g.metodo)}</div>` +
+    '<h2 style="margin-top:8px">Trechos falados (com tempo na fonte)</h2>' + falados +
+    '<h2 style="margin-top:10px">Títulos editoriais derivados (não são falas)</h2>' + titulos;
+}
+window.desenharGanchos = desenharGanchos;
+$('bGanchos').onclick = async () => {
+  $('ganInfo').textContent = 'Lendo a transcrição…';
+  try { st.ganchos = await api('/api/ganchos', {json: {plano: plano()}}); st.estadoSug = {}; $('ganInfo').textContent = ''; desenharGanchos(); }
+  catch (e) { $('ganInfo').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+};
+$('ganchos').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const box = b.closest('.sug'), a = b.dataset.a;
+  try {
+    if (box.dataset.g !== undefined) {
+      const c = st.ganchos.falados[+box.dataset.g];
+      const ini = parseFloat(box.querySelector('[data-c="ini"]').value), fim = parseFloat(box.querySelector('[data-c="fim"]').value);
+      const op = {tipo: 'inserir_inicio', fonte: c.fonte, ini, fim};
+      if (a === 'ouvir') return tocar(c.fonte, ini, fim);
+      if (a === 'previa') return previaCom(op);
+      if (a === 'aplicar') { await aplicarOp(op); st.estadoSug[c.id] = 'aplicada'; msg('Gancho inserido no início (o trecho continua no lugar original). Ctrl+Z desfaz.', 'ok'); }
+      if (a === 'versao') { await aplicarOp(op, `gancho em ${fmt(ini)} da fonte`, `Gancho ${fmt(ini)}`); st.estadoSug[c.id] = 'aplicada'; }
+      if (a === 'rejeitar') st.estadoSug[c.id] = 'rejeitada';
+    } else {
+      const t = st.ganchos.titulos[+box.dataset.t], texto = box.querySelector('input').value.trim();
+      const op = {tipo: 'adicionar_titulo', texto, ini: 0, fim: 3, origem: 'sugestao_local'};
+      if (a === 'aplicar') { await aplicarOp(op); st.estadoSug[t.id] = 'aplicada'; }
+      if (a === 'versao') { await aplicarOp(op, `título sugerido: ${texto}`, `Título ${texto.slice(0, 18)}`); st.estadoSug[t.id] = 'aplicada'; }
+      if (a === 'rejeitar') st.estadoSug[t.id] = 'rejeitada';
+    }
+    desenharGanchos();
+  } catch (err) { msg(esc(err.message), 'bad'); }
+};
+
+// ================================================================ referências
+const fmtN = n => n == null ? '—' : Number(n).toLocaleString('pt-BR');
+async function carregarRefs() {
+  try {
+    const cfg = await api('/api/config');
+    st.cfg = cfg;
+    const yt = cfg.youtube ? '<span class="ok">(YOUTUBE_API_KEY configurada)</span>' : '<span class="warn">(sem YOUTUBE_API_KEY)</span>';
+    const gm = cfg.gemini ? `<span class="ok">(configurado: ${esc(cfg.gemini_modelo)})</span>` : '<span class="warn">(sem GEMINI_API_KEY)</span>';
+    $('refCfg').innerHTML = `Acesso disponível: <b>arquivo enviado</b> → análise local (sempre) · <b>YouTube</b> → metadados ${yt}, ` +
+      `vídeo só pelo Gemini ${gm} · <b>TikTok</b> → só título/autor (oEmbed), vídeo só por arquivo. O app não baixa vídeos de terceiros.`;
+    st.refs = await api('/api/referencias');
+    desenharRefs();
+  } catch (e) { $('refs').innerHTML = `<div class="bad">${esc(e.message)}</div>`; }
+}
+window.carregarRefs = carregarRefs;
+window.iniciarReferencias = carregarRefs;
+function blocoAnalise(r, prov, a) {
+  const cab = prov === 'gemini' ? '<span class="tag ia">Gemini</span>' : '<span class="tag loc">local</span>';
+  const obs = a.observacoes.map(o => `<div class="obs"><button class="mini" data-ver="${o.t}" ${r.tipo === 'arquivo' ? '' : 'disabled'}>${fmt(o.t)}</button> <b>${esc(o.categoria)}</b> ${esc(o.texto)}</div>`).join('');
+  const qs = (a.quadros || []).length ? `<div class="quadros">${a.quadros.map(q => `<figure><img src="${q.url}" alt="quadro em ${fmt(q.t)}"><figcaption>${fmt(q.t)}</figcaption></figure>`).join('')}</div>` : '';
+  const lim = (a.limitacoes || []).map(l => `<div class="warn" style="font-size:12px">⚠ ${esc(l)}</div>`).join('');
+  return `<details ${prov === 'local' ? 'open' : ''}><summary>${cab} ${a.observacoes.length} observações${a.em_cache ? ' (cache)' : ''}</summary>
+    <div class="mut">${esc(a.metodo)}${a.envio ? ' · ' + esc(a.envio) : ''}</div>${a.resumo ? `<div class="obs">${esc(a.resumo)}</div>` : ''}${obs}${qs}${lim}</details>`;
+}
+function desenharRefs() {
+  if (!st.refs.length) {
+    $('refs').innerHTML = '<div class="mut" style="margin-top:6px">Nenhuma referência ainda. Prefira vídeos do mesmo tema, idioma, duração e formato, com desempenhos diferentes (não só os que deram certo).</div>';
+    return;
+  }
+  $('refs').innerHTML = st.refs.map(r => {
+    const d = r.desempenho, m = r.metadados, u = r.metricas_usuario || {}, tg = r.tags || {};
+    const views = `Views: <b>${fmtN(d.views)}</b> ` + (d.origem_views ? `(${esc(d.origem_views)}${d.consultado_em ? ', em ' + esc(d.consultado_em.slice(0, 10)) : ''})` : '(indisponível)');
+    const pub = ' · publicado: ' + (d.publicado_em ? esc(d.publicado_em.slice(0, 10)) + ` (${esc(d.origem_publicacao)})` : '—');
+    const idade = d.dias_no_ar ? ` · ${d.dias_no_ar} dias no ar · ${fmtN(d.views_por_dia)} views/dia` : '';
+    const canal = (m && m.canal ? ' · canal: ' + esc(m.canal) : '') + (d.inscritos != null ? ' · ' + fmtN(d.inscritos) + ' inscritos' : '');
+    const anal = Object.entries(r.analises || {}).map(([prov, a]) => blocoAnalise(r, prov, a)).join('');
+    const botoes = (r.tipo === 'arquivo' ? '<button class="mini" data-a="local">Analisar localmente</button>' : '') +
+      (r.tipo !== 'tiktok' ? `<button class="mini" data-a="gemini" ${st.cfg && st.cfg.gemini ? '' : 'disabled title="Configure GEMINI_API_KEY"'}>Analisar com Gemini</button>` : '') +
+      (r.tipo === 'arquivo' ? '<label class="mut" style="margin:0"><input type="checkbox" class="consent"> autorizo ENVIAR este arquivo ao Google (Gemini)</label>' : '');
+    return `<div class="sug" data-r="${r.id}">
+      <div class="row"><input type="checkbox" class="cmpSel" checked aria-label="usar na comparação"><b style="flex:1">${esc(r.nome)}</b><span class="tag">${esc(r.tipo)}</span><button class="mini" data-a="remover">✕</button></div>
+      ${r.url ? `<div class="mut" style="word-break:break-all">${esc(r.url)}</div>` : ''}
+      <div class="mut">Acesso: metadados ${r.acesso && r.acesso.metadados ? '<span class="ok">sim</span>' : 'não'} · vídeo: ${esc((r.acesso || {}).audiovisual || '')}</div>
+      <div class="mut">${views}${pub}${idade}${canal}</div>
+      ${(r.avisos || []).map(a => `<div class="warn" style="font-size:12px">⚠ ${esc(a)}</div>`).join('')}
+      <details><summary class="mut">Informar métricas à mão (ficam marcadas como "informado por você")</summary>
+        <div class="row"><input type="number" min="0" placeholder="views" data-m="views" value="${u.views ?? ''}" style="width:110px" aria-label="views">
+          <input type="date" data-m="publicado_em" value="${u.publicado_em ? u.publicado_em.slice(0, 10) : ''}" aria-label="data de publicação">
+          <input type="number" min="0" placeholder="inscritos" data-m="inscritos" value="${u.inscritos ?? ''}" style="width:110px" aria-label="inscritos">
+          <select data-tag="legenda" aria-label="tem legenda na tela?"><option value="">legenda na tela?</option><option ${tg.legenda === 'sim' ? 'selected' : ''}>sim</option><option ${tg.legenda === 'não' ? 'selected' : ''}>não</option></select>
+          <input type="text" placeholder="tema" data-tag="tema" value="${esc(tg.tema || '')}" style="width:110px" aria-label="tema">
+          <button class="mini" data-a="metricas">Salvar</button></div></details>
+      <div class="row" style="margin-top:4px">${botoes}</div><div class="prog"></div>${anal}</div>`;
+  }).join('');
+}
+$('bRefUrl').onclick = async () => {
+  try { await api('/api/referencias', {json: {url: $('refUrl').value}}); $('refUrl').value = ''; carregarRefs(); }
+  catch (e) { msg(esc(e.message), 'bad'); }
+};
+$('refArq').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const j = await enviar(f); await api('/api/referencias', {json: {upload_id: j.id, nome: j.nome}}); carregarRefs(); }
+  catch (err) { msg(esc(err.message), 'bad'); }
+  e.target.value = '';
+};
+$('refs').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const box = b.closest('[data-r]'), rid = box.dataset.r, ref = st.refs.find(r => r.id === rid);
+  if (b.dataset.ver !== undefined && ref.tipo === 'arquivo') {
+    let v = box.querySelector('video.refv');
+    if (!v) { v = document.createElement('video'); v.className = 'refv'; v.controls = true; v.style.cssText = 'width:100%;max-height:300px;margin-top:6px'; v.src = '/media/' + ref.upload_id; box.appendChild(v); }
+    v.currentTime = +b.dataset.ver; v.play(); return;
+  }
+  try {
+    if (b.dataset.a === 'remover') {
+      if (!confirm('Remover esta referência da lista?')) return;
+      await api(`/api/referencias/${rid}`, {method: 'DELETE'}); return carregarRefs();
+    }
+    if (b.dataset.a === 'metricas') {
+      const met = {}; box.querySelectorAll('[data-m]').forEach(i => { met[i.dataset.m] = i.type === 'number' ? (i.value === '' ? null : +i.value) : i.value; });
+      const tags = {}; box.querySelectorAll('[data-tag]').forEach(i => { tags[i.dataset.tag] = i.value; });
+      await api(`/api/referencias/${rid}`, {method: 'PUT', json: {metricas_usuario: met, tags}}); return carregarRefs();
+    }
+    if (b.dataset.a === 'local' || b.dataset.a === 'gemini') {
+      const c = box.querySelector('.consent'), consent = !!(c && c.checked);
+      if (b.dataset.a === 'gemini' && ref.tipo === 'arquivo' && !consent) return msg('Marque o consentimento: o arquivo seria enviado ao Google.', 'warn');
+      const t = await api(`/api/referencias/${rid}/analisar`, {json: {provedor: b.dataset.a, permitir_envio: consent}});
+      await acompanhar(t, box.querySelector('.prog'), b.dataset.a === 'gemini' ? 'Gemini' : 'Análise local');
+      return carregarRefs();
+    }
+  } catch (err) { msg(esc(err.message), 'bad'); carregarRefs(); }
+};
+$('bComparar').onclick = async () => {
+  const ids = [...document.querySelectorAll('#refs [data-r]')].filter(b => b.querySelector('.cmpSel').checked).map(b => b.dataset.r);
+  try { st.comparacao = await api('/api/comparar', {json: {referencias: ids, plano: plano()}}); desenharComparacao(); }
+  catch (e) { $('comparacao').innerHTML = `<div class="bad">${esc(e.message)}</div>`; }
+};
+const ROT = {primeira_fala_s: 'até 1a fala (s)', cortes_por_min: 'cortes/min', plano_medio_s: 'plano médio (s)',
+  palavras_por_min: 'palavras/min', repeticoes: 'repetições', duracao_s: 'duração (s)'};
+function desenharComparacao() {
+  const c = st.comparacao; if (!c) return;
+  const cols = Object.keys(ROT);
+  const linhas = c.referencias.map(r => `<tr><td>${esc(r.nome)}<div class="mut">${r.desempenho.origem_views ? esc(r.desempenho.origem_views) : 'sem views'}</div></td>
+      <td>${fmtN(r.desempenho.views_por_dia)}</td>${cols.map(k => `<td>${r.metricas[k] ?? '—'}</td>`).join('')}</tr>`).join('');
+  const meu = c.meu ? `<tr style="background:#1c2638"><td><b>Seu vídeo (versão atual)</b></td><td>—</td>${cols.map(k => `<td>${c.meu[k] ?? '—'}</td>`).join('')}</tr>` : '';
+  const hip = c.hipoteses.length ? c.hipoteses.map(h => `<div class="sug"><span class="tag">evidência ${esc(h.evidencia)}</span> ${esc(h.texto)}<div class="mut">${esc(h.por_que)}</div></div>`).join('')
+    : '<div class="mut">Nenhuma hipótese com os dados atuais.</div>';
+  const rec = (c.recomendacoes || []).length ? c.recomendacoes.map((r, i) => `<div class="sug" data-rec="${i}"><b>${esc(r.titulo)}</b> <span class="tag">${esc(r.forca)}</span>
+      <div>${esc(r.explicacao)}</div>
+      ${r.evidencia.length ? `<div class="mut">Evidência: ${r.evidencia.map(ev => ev.hipotese ? esc(ev.hipotese) : `${esc(ev.ref)}: ${esc(ev.valor)}`).join(' · ')}</div>` : ''}
+      ${r.tempos_fonte ? `<div class="mut">Na fonte: ${fmt(r.tempos_fonte[0])}–${fmt(r.tempos_fonte[1])}</div>` : ''}
+      <div class="row" style="margin-top:4px"><button class="mini" data-a="previa">Prévia</button><button class="mini" data-a="versao">Criar versão</button><button class="mini" data-a="aplicar">Aplicar aqui</button></div></div>`).join('')
+    : '<div class="mut">Nenhuma recomendação com base nas referências analisadas.</div>';
+  $('comparacao').innerHTML = `<table style="margin-top:6px"><thead><tr><th>Vídeo</th><th>views/dia</th>${cols.map(k => `<th>${ROT[k]}</th>`).join('')}</tr></thead><tbody>${linhas}${meu}</tbody></table>
+    ${c.meu && c.meu.nota ? `<div class="mut">${esc(c.meu.nota)}</div>` : ''}
+    <h2 style="margin-top:10px">Hipóteses (não são causas)</h2>${hip}
+    ${c.notas.map(n => `<div class="warn" style="font-size:12px">⚠ ${esc(n)}</div>`).join('')}
+    <h2 style="margin-top:10px">Recomendações para o seu vídeo</h2>${rec}`;
+}
+$('comparacao').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const box = b.closest('[data-rec]'); if (!box) return;
+  const r = st.comparacao.recomendacoes[+box.dataset.rec];
+  try {
+    if (b.dataset.a === 'previa') return previaCom(r.operacao);
+    if (b.dataset.a === 'versao') await aplicarOp(r.operacao, `recomendação: ${r.titulo}`, r.titulo);
+    if (b.dataset.a === 'aplicar') await aplicarOp(r.operacao);
+    box.classList.add('aplicada'); msg('Aplicado. Ctrl+Z desfaz; o seletor de versão alterna entre as versões.', 'ok');
+  } catch (err) { msg(esc(err.message), 'bad'); }
+};
+
 (async function iniciar() {
   try { const j = await api('/api/presets'); st.presets = j.presets; } catch (e) { msg('Não carreguei os estilos: ' + esc(e.message), 'bad'); }
   const v = {...st.presets.classico}; delete v.nome; st.versoes[0].plano.legenda.estilo = v;

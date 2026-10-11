@@ -38,6 +38,12 @@ def studio(tmp_path, monkeypatch):
     monkeypatch.setattr(editor, "CACHE", tmp_path / "cache")
     for sub in ("edicoes", "cache/transcricoes", "cache/previas", "cache/miniaturas", "cache/analises"):
         (tmp_path / sub).mkdir(parents=True)
+    import referencias
+    monkeypatch.setattr(referencias, "REFS", tmp_path / "referencias")
+    (tmp_path / "referencias").mkdir()
+    monkeypatch.setattr(referencias, "_config_local", lambda: {})   # nunca usa chaves reais nos testes
+    for k in ("YOUTUBE_API_KEY", "GEMINI_API_KEY", "GEMINI_MODELO"):
+        monkeypatch.delenv(k, raising=False)
     return A
 
 

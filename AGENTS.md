@@ -29,6 +29,14 @@ iniciar.bat / ./iniciar.sh                       # cria .venv, instala requireme
 - Toda rota POST exige `Content-Type: application/json` (exceto `/upload`, multipart) e recusa Host fora de 127.0.0.1/localhost e `Origin` de outro site. Em `curl`, mande `-H "Content-Type: application/json"`.
 - Erros sempre em JSON: `{"erro": "..."}`, com status 400/403/404/413/415/500/504.
 
+## Editor assistido (módulos e contratos)
+- `editor.py`: plano de edição v1 (`validar_plano` é a porta de entrada de QUALQUER plano, inclusive vindo de IA), `mapa`/`fonte_para_saida`/`saida_para_fonte` (fonte x saída), `eventos_legenda` (legenda em tempo de fonte projetada na saída), `ass_plano` (estilos Legenda e Titulo), `render_plano` (prévia e exportação, a mesma função), `transcrever_fonte` (cache por sha256 + modelo + idioma), projetos em `edicoes/`.
+- `tarefas.py`: tarefas em segundo plano (uma pesada por vez), progresso, cancelamento; `tarefas.ffmpeg` mata o processo ao cancelar ou estourar o prazo.
+- `referencias.py`: metadados oficiais (YouTube Data API, TikTok oEmbed), análise local de arquivo, provedor Gemini (opcional, resposta validada por `validar_resposta_gemini`), `comparar` (hipóteses só com separação clara, rótulo de evidência, nada estimado). Credenciais só do ambiente/`config_local.env`, nunca em log nem exportação.
+- `sugestoes.py`: `ganchos` (fala real + títulos derivados, separados), `aplicar_operacao` (conjunto FECHADO: inserir_inicio, adicionar_titulo, remover_trecho, cortar_inicio, ativar_legenda, ativar_zoom; sempre revalida), `recomendacoes`.
+- Rotas: `/editor`, `/api/plano/validar`, `/api/render` (202 + tarefa), `/api/tarefas/<id>` (+ `/cancelar`), `/api/transcricao`, `/api/legenda/frases|editar`, `/api/miniaturas`, `/api/projetos`, `/api/referencias` (+ `/analisar`), `/api/comparar`, `/api/ganchos`, `/api/operacao`, `/api/config`.
+- Não baixe vídeos de terceiros nem tente burlar plataforma: URL sem acesso audiovisual oficial = só metadados + pedir o arquivo.
+
 ## Regras (definidas pelo dono do projeto)
 1. ~~Origem do material obrigatória~~: **revogada pelo dono em 2026-10-11**. A origem não aparece mais na UI. O backend ainda aceita os campos opcionais `origem` e `prova`.
 2. **Proibido**: login, postagem automática, API não oficial do TikTok, compra de engajamento ou qualquer coisa que arrisque a conta. Também não implementar download ou scraping de vídeo.

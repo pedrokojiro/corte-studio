@@ -2,7 +2,8 @@
 
 Duas ferramentas locais, sem conta, sem login e sem publicação automática (você posta manualmente, de propósito):
 
-- **`app.py` + `index.html`**: front-end no navegador para cortar vídeo em 9:16 com legenda, narração e trilha.
+- **`/editor`** (`editor.py`, `editor.html`, `editor.js`): editor assistido com linha do tempo, legendas com estilo, títulos, efeitos, versões, ganchos e análise de referências.
+- **`app.py` + `index.html`** (modo simples): front-end no navegador para cortar vídeo em 9:16 com legenda, narração e trilha.
 - **`dark.py`**: pipeline por linha de comando que transforma um roteiro JSON e imagens geradas por você em vídeo vertical narrado.
 
 ## Instalar e abrir
@@ -12,6 +13,34 @@ Duas ferramentas locais, sem conta, sem login e sem publicação automática (vo
    - Na 1a vez o script cria um ambiente próprio em `.venv/` e instala ali as versões fixadas (`requirements.txt` + `constraints.txt`). **Nada é instalado nem atualizado no Python do sistema** (verificado: `pip freeze` global idêntico antes e depois).
    - Ele só reinstala quando `requirements.txt` ou `constraints.txt` mudam. Faltou ffmpeg, Python ou internet, ou a porta 5000 já está em uso (app aberto duas vezes)? A mensagem sai em português e a janela espera você ler.
    - A 1a transcrição baixa o modelo `small` do Whisper (~480 MB) do Hugging Face.
+
+## Editor assistido (`/editor`)
+Abra http://127.0.0.1:5000/editor (há um link "modo simples" de volta para a tela antiga, que continua funcionando).
+
+**Como funciona por dentro.** Tudo o que você faz vira um **plano de edição** (JSON versão 1, validado no servidor) com fontes, segmentos (em tempo da *fonte*), legenda (palavras em tempo da *fonte*), títulos (em tempo de *saída*), efeitos e áudio. A **prévia e a exportação são feitas pela mesma função, a partir do mesmo plano**: a prévia só usa resolução menor (540×960, marcada como tal). A mídia original nunca é alterada.
+
+1. **Fontes e linha do tempo**: envie um ou mais vídeos. Cada um entra inteiro como segmento. Marque com <kbd>I</kbd>/<kbd>O</kbd> e <kbd>Enter</kbd>, divida no cursor (<kbd>S</kbd>), apare início e fim (campos ou "= cursor"), reordene (↑↓), remova (✕ ou <kbd>Del</kbd>). "Sugerir" acha cortes limpos (cenas e pausas). Desfazer e refazer (<kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd>) cobrem tudo.
+2. **Legenda**: "Transcrever e gerar frases" transcreve a fonte inteira (com barra de progresso e botão de cancelar; fica em cache pelo conteúdo do arquivo). Edite o texto de cada frase (o tempo das palavras é preservado), use `|` para dividir, ⤵ para juntar, −/+ para adiantar ou atrasar 0,1s, ✕ para esconder. Como as palavras guardam o tempo da fonte, **cortar, reordenar ou repetir trechos mantém a sincronia** sem refazer nada.
+3. **Estilo**: 4 presets (Clássico, Caixa, Palavra em destaque, Discreto) com miniaturas renderizadas pelo mesmo motor (libass) da exportação, e ajuste de fonte, tamanho, cor, contorno, caixa de fundo, posição, maiúsculas, negrito e destaque da palavra falada. Fonte não instalada gera aviso.
+4. **Títulos** (aba Títulos): texto editorial, numa caixa clara no alto, **separado da legenda de fala** e marcado pela origem (seu / sugerido).
+5. **Efeitos e áudio**, cada um independente: enquadramento 9:16, zoom lento por segmento (intensidade 2–15%), corte seco ou fade pelo preto (não muda a duração), volume original, normalização −14 LUFS, música com volume e "abaixar quando alguém fala".
+6. **Versões**: "Duplicar versão" ou aplicar uma sugestão como versão; "Comparar versões" mostra as duas prévias lado a lado. Salve com <kbd>Ctrl+S</kbd> (fica em `edicoes/`) e reabra pelo menu "Abrir projeto". Se um vídeo-fonte foi apagado de `uploads/`, o editor avisa ao abrir.
+7. **Ganchos** (aba Ganchos, precisa da transcrição): trechos **falados de verdade**, com tempo na fonte e o porquê (pergunta, número, palavras de impacto, fala direta, tamanho, intensidade da voz, posição), e **títulos derivados** dessa fala, separados e marcados como "não é citação". Cada sugestão pode ser ouvida, ajustada, vista em prévia, aplicada (o trecho é repetido no início; o original continua no lugar), virar uma versão ou ser rejeitada. É heurística local: não prevê desempenho.
+8. **Referências** (aba Referências):
+   - **Arquivo enviado por você** → análise local de verdade: trocas de cena, ritmo, plano mais longo, primeira e última fala, repetições, silêncios, volume (LUFS), formato e quadros nas trocas de cena, tudo com tempo. Estilo de legenda e efeitos **não** são detectados localmente (está escrito no resultado).
+   - **URL do YouTube** → metadados oficiais (views, data, duração, canal, inscritos) **se** houver `YOUTUBE_API_KEY`. Vídeo e áudio só pelo **Gemini**, se houver `GEMINI_API_KEY`.
+   - **URL do TikTok** → só título e autor (oEmbed oficial, sem views). Para analisar o vídeo, envie o arquivo.
+   - O app **não baixa vídeos de terceiros**. Métricas que você digitar ficam marcadas como "informado por você".
+   - Para analisar um arquivo local com o Gemini, o vídeo é **enviado ao Google**: só com a caixa de consentimento marcada.
+   - **Comparar** mostra views/dia (com a origem de cada número), as métricas medidas, notas sobre diferenças de exposição, canal e formato, **hipóteses rotuladas** ("evidência muito fraca/fraca", nunca causa) e recomendações para o seu vídeo, cada uma com a evidência, o trecho da fonte e os botões Prévia / Criar versão / Aplicar.
+
+**Credenciais (opcionais)**: crie `config_local.env` na pasta do app (já está no `.gitignore`) ou use variáveis de ambiente:
+```
+YOUTUBE_API_KEY=...        # YouTube Data API v3 (só metadados; 1 unidade de cota por chamada)
+GEMINI_API_KEY=...         # Gemini (análise audiovisual de URL pública do YouTube ou de arquivo com consentimento)
+GEMINI_MODELO=gemini-3.8-flash
+```
+As chaves ficam só no servidor: não vão para a página, para o projeto, para a exportação nem para mensagens de erro. Sem chaves, o editor, a legenda, os ganchos e a análise local funcionam normalmente.
 
 ## Usar o app (cortes)
 1. Envie o vídeo. Marque início e fim com os botões ou com as teclas I e O. Adicione quantos cortes quiser.
@@ -73,7 +102,7 @@ Saída: MP4 1080x1920, 30 fps, H.264 + AAC, com zoom suave (filtro `perspective`
 .venv\Scripts\python -m pytest -q
 .venv\Scripts\python tests/medir_sync.py      (medição manual; precisa de internet)
 ```
-São 100 testes, todos com mídia sintética gerada pelo ffmpeg em pastas temporárias. Cobrem: linha do tempo entre cortes (bipe e flash em cada fronteira), transcrição com Whisper falso e real, legenda velha ou ausente, downloads e nomes de dispositivo do Windows, uploads inválidos, nomes únicos com renders simultâneos, proteção de origem/host, tipos do roteiro, tremido do zoom, prazos sem processo órfão, limpeza, fonte ausente, contorno de OpenMP só no conda, além dos testes anteriores (cortes, vídeo sem áudio, tpad, duração, pipeline). Os testes de edge-tts e Whisper reais são pulados sem internet ou sem o modelo.
+São 169 testes, todos com mídia sintética gerada pelo ffmpeg em pastas temporárias. Cobrem: linha do tempo entre cortes (bipe e flash em cada fronteira), transcrição com Whisper falso e real, legenda velha ou ausente, downloads e nomes de dispositivo do Windows, uploads inválidos, nomes únicos com renders simultâneos, proteção de origem/host, tipos do roteiro, tremido do zoom, prazos sem processo órfão, limpeza, fonte ausente, contorno de OpenMP só no conda, além dos testes anteriores (cortes, vídeo sem áudio, tpad, duração, pipeline). Os testes de edge-tts e Whisper reais são pulados sem internet ou sem o modelo.
 
 ## Ambiente testado
 - **Sistema operacional testado de verdade**: só Windows 10 Pro 22H2 (10.0.19045). O `iniciar.sh` foi executado no Git Bash desse Windows, não em Linux nem macOS.
@@ -83,12 +112,17 @@ São 100 testes, todos com mídia sintética gerada pelo ffmpeg em pastas tempor
 - faster-whisper 1.2.1 declara `av>=11`, e o av 19 quebra o `decode_audio` dele. O app não usa essa função: decodifica o áudio com o ffmpeg.
 
 ## O que foi testado de verdade (Windows 10, 2026-10-11)
+- **Editor no navegador**: fonte enviada, dividir no cursor, reordenar, transcrever e ver as frases seguirem a nova ordem, 4 miniaturas de estilo, preset com destaque, título, zoom, prévia (quadros inspecionados: título em caixa no alto, palavra falada em destaque), desfazer/refazer, salvar e reabrir, gancho virando versão, comparação de versões lado a lado, referência local analisada, URL do YouTube sem chave e do TikTok com 429 viraram avisos, comparação com hipóteses rotuladas.
 - `iniciar.bat`: sem ffmpeg (mensagem e pausa), caminho feliz pelo `.venv` e porta já ocupada. `iniciar.sh` no Git Bash: sem ffmpeg, porta ocupada e caminho feliz.
 - Interface no navegador: upload, cortes, transcrição, estado da legenda (sincronizada / desatualizada), avisos do render, cartão de espaço em disco.
 - Render, legenda, narração (enviada e edge-tts real), trilha, vídeo sem áudio, entrada 4K curta, pipeline com 3 cenas e `lote`, projeto em pasta com espaço e acento.
 - Zoom: medido numericamente (borda em x e y) e inspecionado visualmente em quimógrafo, isto é, a trajetória da borda quadro a quadro numa imagem. **Não** assisti o vídeo em movimento.
 
 ## O que ficou sem teste
+- **Análise audiovisual pelo Gemini nunca foi chamada de verdade**: não há `GEMINI_API_KEY` nesta máquina. O formato do pedido e da resposta segue a documentação oficial (endpoint `interactions`, consultada em 2026-10-11) e é testado com respostas simuladas, inclusive malformadas, mas o comportamento real do serviço não foi verificado.
+- **YouTube Data API**: sem chave; só testada com respostas simuladas.
+- **TikTok oEmbed**: a única chamada real recebeu HTTP 429 (limite de taxa) e o app registrou a limitação; uma resposta de sucesso real não foi vista.
+- Títulos derivados localmente às vezes repetem a frase inteira (a heurística só tira muletas e corta em vírgula/7 palavras).
 - Linux e macOS de verdade (`iniciar.sh`, wheels das versões fixadas, `xdg-open`/`open`).
 - Python do python.org e o launcher `py -3` no `.bat` (esta máquina não tem o `py`).
 - Vídeos longos (mais de 10 min) na interface; tempo de render em máquina mais fraca; os prazos (`prazo_midia`) foram calibrados só nesta máquina.
