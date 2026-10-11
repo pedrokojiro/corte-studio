@@ -60,7 +60,7 @@ def test_auditar_contradicao_ficcao_x_historia_real(tmp_path):
 @pytest.mark.parametrize("conteudo, msg", [
     ("{", "JSON inválido"),
     ('{"id": "x", "titulo": "t"}', "cenas"),
-    ('{"id": "x", "titulo": "t", "cenas": [{"texto": ""}]}', "texto preenchido"),
+    ('{"id": "x", "titulo": "t", "cenas": [{"texto": ""}]}', "cena 1 obrigatório"),
 ])
 def test_carregar_roteiro_invalido(tmp_path, conteudo, msg):
     p = tmp_path / "roteiro.json"

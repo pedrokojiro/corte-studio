@@ -20,8 +20,10 @@ import time
 import unicodedata
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import Flask, jsonify, request, send_file, abort
+from werkzeug.exceptions import HTTPException
 
 ROOT = Path(__file__).resolve().parent
 UP, OUT, TMP = ROOT / "uploads", ROOT / "saida", ROOT / "tmp"
@@ -39,7 +41,19 @@ EXT_OK = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mp3", ".wav", ".m4a
 
 
 class Erro(Exception):
-    pass
+    """Erro com mensagem para o usuário; `status` vira o código HTTP."""
+
+    def __init__(self, msg, status=400):
+        super().__init__(msg)
+        self.status = status
+
+
+def _float(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return x if x == x and x > 0 else 0.0  # descarta NaN e não-positivos
 
 
 def run(cmd, cwd=None):
@@ -55,12 +69,20 @@ def run(cmd, cwd=None):
 
 def probe(path):
     out = run(["ffprobe", "-v", "error", "-show_entries",
-               "format=duration:stream=codec_type,width,height", "-of", "json", str(path)])
-    info = json.loads(out)
-    streams = info.get("streams", [])
+               "format=duration:stream=codec_type,width,height,duration", "-of", "json", str(path)])
+    try:
+        info = json.loads(out or "{}")
+    except ValueError:
+        raise Erro("Não consegui ler as informações desse arquivo.")
+    streams = info.get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None)
+    dur = _float((info.get("format") or {}).get("duration")) or max(
+        (_float(s.get("duration")) for s in streams), default=0.0)
+    if not dur:
+        raise Erro("Esse arquivo não informa a duração (comum em gravação 'ao vivo'). "
+                   "Converta antes: ffmpeg -i entrada -c copy saida.mp4")
     return {
-        "duracao": float(info["format"]["duration"]),
+        "duracao": dur,
         "tem_audio": any(s.get("codec_type") == "audio" for s in streams),
         "largura": v.get("width") if v else None,
         "altura": v.get("height") if v else None,
@@ -353,8 +375,16 @@ def chave_transcricao(video_id=None, cortes=None, audio_id=None):
     return f"v:{video_id}:" + ";".join(f"{quadros(a)}-{quadros(b)}" for a, b in cortes)
 
 
+NOME_SAIDA = re.compile(r"[a-z0-9-]{1,40}_\d{8}-\d{6}(?:_[a-f0-9]{6})?\.mp4")
+
+
 def nome_saida(nome):
-    return f"{slug(nome)}_{time.strftime('%Y%m%d-%H%M%S')}"
+    """Nome único em saida/: slug + data-hora + sufixo aleatório (renders simultâneos não colidem)."""
+    base = f"{slug(nome)}_{time.strftime('%Y%m%d-%H%M%S')}"
+    while True:
+        n = f"{base}_{uuid.uuid4().hex[:6]}"
+        if not (OUT / f"{n}.mp4").exists() and not (OUT / f"{n}.json").exists():
+            return n
 
 
 def salvar_par(mp4_tmp, registro):
@@ -521,9 +551,54 @@ def renderizar(job):
 
 
 # --------------------------------------------------------------- rotas
+HOSTS_LOCAIS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _host_local(valor):
+    try:
+        return (urlparse("//" + (valor or "")).hostname or "") in HOSTS_LOCAIS
+    except ValueError:
+        return False
+
+
+@app.before_request
+def so_o_navegador_local():
+    """O app escuta só em 127.0.0.1, mas qualquer site aberto no navegador consegue mandar
+    requisições para lá. Recusa Host estranho (DNS rebinding) e POST vindo de outro site."""
+    if not _host_local(request.host):
+        raise Erro("Acesso recusado: o Corte Studio só atende em 127.0.0.1 ou localhost.", 403)
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origem = request.headers.get("Origin")
+        de_fora = request.headers.get("Sec-Fetch-Site") == "cross-site"
+        if de_fora or (origem is not None and not _host_local(urlparse(origem).netloc)):
+            raise Erro("Requisição de outro site recusada.", 403)
+
+
+def corpo_json():
+    if not request.is_json:
+        raise Erro("Envie os dados como JSON (Content-Type: application/json).", 415)
+    j = request.get_json(silent=True)
+    if not isinstance(j, dict):
+        raise Erro("JSON inválido.")
+    return j
+
+
 @app.errorhandler(Erro)
 def erro(e):
-    return jsonify({"erro": str(e)}), 400
+    return jsonify({"erro": str(e)}), getattr(e, "status", 400)
+
+
+@app.errorhandler(HTTPException)
+def erro_http(e):
+    msg = {404: "Não encontrado.", 413: "Arquivo grande demais (limite de 8 GB).",
+           405: "Método não permitido."}.get(e.code, e.description)
+    return jsonify({"erro": msg}), e.code
+
+
+@app.errorhandler(Exception)
+def erro_inesperado(e):
+    app.logger.exception("Erro inesperado")
+    return jsonify({"erro": f"Erro interno ({type(e).__name__}): {e}. Detalhes no terminal do app."}), 500
 
 
 @app.get("/")
@@ -541,12 +616,15 @@ def upload():
         raise Erro(f"Formato {ext or '(sem extensão)'} não suportado.")
     fid = uuid.uuid4().hex[:12]
     dest = UP / f"{fid}{ext}"
-    f.save(dest)
     try:
+        f.save(dest)
         info = probe(dest)
-    except Erro:
+    except Erro as e:
         dest.unlink(missing_ok=True)
-        raise Erro("Não consegui ler esse arquivo de mídia.")
+        raise Erro(f"Não consegui ler esse arquivo de mídia. {e}")
+    except BaseException:
+        dest.unlink(missing_ok=True)  # nada de arquivo pela metade em uploads/
+        raise
     return jsonify({"id": fid, "nome": f.filename, **info})
 
 
@@ -560,12 +638,12 @@ def media(fid):
 
 @app.post("/render")
 def render():
-    return jsonify(renderizar(request.get_json(force=True, silent=True) or {}))
+    return jsonify(renderizar(corpo_json()))
 
 
 @app.post("/transcrever")
 def rota_transcrever():
-    job = request.get_json(force=True, silent=True) or {}
+    job = corpo_json()
     t0 = time.time()
     if job.get("audio_id"):  # narração enviada
         texto, tempos = transcrever(achar(job["audio_id"]))
@@ -586,7 +664,7 @@ def rota_transcrever():
 
 @app.post("/analisar")
 def analisar():
-    job = request.get_json(force=True, silent=True) or {}
+    job = corpo_json()
     src = achar(job.get("video_id"))
     info = probe(src)
     dmin = num(job.get("min"), 1, 600, 15)
@@ -599,10 +677,10 @@ def analisar():
 
 @app.get("/saida/<nome>")
 def baixar(nome):
-    p = OUT / Path(nome).name
-    if not p.exists() or p.suffix != ".mp4":
+    # Só nomes no formato que o app gera: bloqueia CON/AUX/NUL e afins (travam no Windows) e ../
+    if not NOME_SAIDA.fullmatch(nome) or not (OUT / nome).is_file():
         abort(404)
-    return send_file(p, conditional=True, as_attachment=request.args.get("dl") == "1")
+    return send_file(OUT / nome, conditional=True, as_attachment=request.args.get("dl") == "1")
 
 
 if __name__ == "__main__":

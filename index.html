@@ -140,10 +140,15 @@ const $ = id => document.getElementById(id);
 const S = {video: null, narr: null, mus: null, cortes: []};
 const fmt = t => { const m = Math.floor(t/60), s = (t%60).toFixed(1).padStart(4,'0'); return m+':'+s; };
 
+// Respostas que não são JSON (erro inesperado, proxy, servidor fora) viram uma mensagem legível.
+async function lerJSON(r){
+  try{ return await r.json(); }
+  catch(e){ return {erro: `Resposta inesperada do servidor (HTTP ${r.status}). Veja a janela do app.`}; }
+}
 async function envia(file){
   const fd = new FormData(); fd.append('arquivo', file);
   const r = await fetch('/upload', {method:'POST', body: fd});
-  const j = await r.json();
+  const j = await lerJSON(r);
   if(!r.ok) throw new Error(j.erro || 'Falha no envio');
   return j;
 }
@@ -213,7 +218,7 @@ $('bSug').onclick = async () => {
   try{
     const r = await fetch('/analisar', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({video_id: S.video.id, min: parseFloat($('smin').value), max: parseFloat($('smax').value)})});
-    const j = await r.json(); if(!r.ok) throw new Error(j.erro || 'Falha na análise');
+    const j = await lerJSON(r); if(!r.ok) throw new Error(j.erro || 'Falha na análise');
     SUG = j.sugestoes;
     const cab = `<div class="mut">${j.cenas} trocas de cena, ${j.pausas} pausas, ${j.segundos}s de análise. ${SUG.length} sugestões.</div>`;
     if(!SUG.length){ $('sug').innerHTML = cab + '<div class="warn">Nenhum corte limpo nessa faixa. Tente aumentar o máximo ou diminuir o mínimo.</div>'; }
@@ -284,7 +289,7 @@ $('bTrans').onclick = async () => {
   $('transInfo').textContent = 'Transcrevendo... (na 1a vez carrega o modelo; leva cerca de 1/3 da duração do áudio)';
   try{
     const r = await fetch('/transcrever', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const j = await r.json(); if(!r.ok) throw new Error(j.erro || 'Falha na transcrição');
+    const j = await lerJSON(r); if(!r.ok) throw new Error(j.erro || 'Falha na transcrição');
     $('texto').value = j.texto; $('texto').oninput();
     S.tempos = j.tempos; S.tempChave = j.chave; S.tempFonte = fonteAtual(); estadoLegenda();
     $('transInfo').innerHTML = `<span class="ok">Transcrito em ${j.segundos}s. Corrija o texto à vontade: a legenda continua sincronizada.</span>`;
@@ -323,7 +328,7 @@ $('go').onclick = async () => {
   msg('Renderizando... pode levar alguns minutos.');
   try{
     const r = await fetch('/render', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const j = await r.json();
+    const j = await lerJSON(r);
     if(!r.ok) throw new Error(j.erro || 'Falha no render');
     msg(`Pronto: ${j.duracao.toFixed(1)}s.` + (j.avisos || []).map(a => `<br><span class="warn">⚠ ${esc(a)}</span>`).join(''), 'ok');
     $('result').innerHTML = `<video controls src="/saida/${j.arquivo}"></video>

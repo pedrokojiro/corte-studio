@@ -18,6 +18,7 @@ Não gera imagens e não publica nada.
 """
 import argparse
 import json
+import re
 import shutil
 import sys
 import time
@@ -47,17 +48,42 @@ def carregar(caminho):
         raise A.Erro(f"Roteiro não encontrado: {caminho}")
     except json.JSONDecodeError as e:
         raise A.Erro(f"JSON inválido em {caminho.name}: linha {e.lineno}, coluna {e.colno}")
-    falta = [k for k in ("id", "titulo", "cenas") if not r.get(k)]
-    if falta:
-        raise A.Erro(f"Campos obrigatórios faltando: {', '.join(falta)}")
-    if not isinstance(r["cenas"], list) or not all(isinstance(c, dict) and (c.get("texto") or "").strip()
-                                                    for c in r["cenas"]):
-        raise A.Erro("'cenas' precisa ser uma lista de {texto, prompt_imagem} com texto preenchido.")
-    r.setdefault("voz", "pt-BR-AntonioNeural")
-    r.setdefault("taxa", "-5%")
-    r.setdefault("estilo_visual", "")
+    validar(r)
     r["_pasta"] = caminho.resolve().parent
     return r
+
+
+def validar(r):
+    """Confere os tipos antes de qualquer processamento (roteiro gerado por IA costuma vir torto)."""
+    if not isinstance(r, dict):
+        raise A.Erro("O roteiro precisa ser um objeto JSON {id, titulo, cenas, ...}.")
+
+    def texto(campo, valor, obrigatorio=False, onde=""):
+        if valor is None or (isinstance(valor, str) and not valor.strip()):
+            if obrigatorio:
+                raise A.Erro(f"Campo '{campo}'{onde} obrigatório e vazio.")
+            return ""
+        if not isinstance(valor, str):
+            raise A.Erro(f"'{campo}'{onde} precisa ser texto, veio {type(valor).__name__}: {valor!r}")
+        return valor
+
+    r["id"] = texto("id", r.get("id"), True)
+    r["titulo"] = texto("titulo", r.get("titulo"), True)
+    r["voz"] = texto("voz", r.get("voz")) or "pt-BR-AntonioNeural"
+    r["taxa"] = texto("taxa", r.get("taxa")) or "-5%"
+    if not re.fullmatch(r"[+-]\d{1,3}%", r["taxa"]):
+        raise A.Erro(f"'taxa' precisa ser como '-5%' ou '+10%', veio {r['taxa']!r}")
+    r["estilo_visual"] = texto("estilo_visual", r.get("estilo_visual"))
+    if "ficcao" in r and not isinstance(r["ficcao"], bool):
+        raise A.Erro(f"'ficcao' precisa ser true ou false, veio {r['ficcao']!r}")
+    cenas = r.get("cenas")
+    if not isinstance(cenas, list) or not cenas:
+        raise A.Erro("'cenas' precisa ser uma lista não vazia de {texto, prompt_imagem}.")
+    for i, c in enumerate(cenas, 1):
+        if not isinstance(c, dict):
+            raise A.Erro(f"A cena {i} precisa ser um objeto {{texto, prompt_imagem}}.")
+        c["texto"] = texto("texto", c.get("texto"), True, onde=f" da cena {i}")
+        c["prompt_imagem"] = texto("prompt_imagem", c.get("prompt_imagem"), onde=f" da cena {i}")
 
 
 def achar_arquivo(pasta, base, exts):
@@ -214,7 +240,7 @@ def cmd_render(r, args):
                "-c", "copy", "base.mp4"], cwd=work)
         total = A.probe(work / "base.mp4")["duracao"]
 
-        nome = f"{A.slug(r['id'])}_{time.strftime('%Y%m%d-%H%M%S')}"
+        nome = A.nome_saida(r["id"])
         cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "base.mp4"]
         if trilha:
             cmd += ["-stream_loop", "-1", "-i", str(trilha), "-filter_complex",
