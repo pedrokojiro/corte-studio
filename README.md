@@ -73,7 +73,7 @@ Saída: MP4 1080x1920, 30 fps, H.264 + AAC, com zoom suave (filtro `perspective`
 .venv\Scripts\python -m pytest -q
 .venv\Scripts\python tests/medir_sync.py      (medição manual; precisa de internet)
 ```
-São 99 testes, todos com mídia sintética gerada pelo ffmpeg em pastas temporárias. Cobrem: linha do tempo entre cortes (bipe e flash em cada fronteira), transcrição com Whisper falso e real, legenda velha ou ausente, downloads e nomes de dispositivo do Windows, uploads inválidos, nomes únicos com renders simultâneos, proteção de origem/host, tipos do roteiro, tremido do zoom, prazos sem processo órfão, limpeza, fonte ausente, contorno de OpenMP só no conda, além dos testes anteriores (cortes, vídeo sem áudio, tpad, duração, pipeline). Os testes de edge-tts e Whisper reais são pulados sem internet ou sem o modelo.
+São 100 testes, todos com mídia sintética gerada pelo ffmpeg em pastas temporárias. Cobrem: linha do tempo entre cortes (bipe e flash em cada fronteira), transcrição com Whisper falso e real, legenda velha ou ausente, downloads e nomes de dispositivo do Windows, uploads inválidos, nomes únicos com renders simultâneos, proteção de origem/host, tipos do roteiro, tremido do zoom, prazos sem processo órfão, limpeza, fonte ausente, contorno de OpenMP só no conda, além dos testes anteriores (cortes, vídeo sem áudio, tpad, duração, pipeline). Os testes de edge-tts e Whisper reais são pulados sem internet ou sem o modelo.
 
 ## Ambiente testado
 - **Sistema operacional testado de verdade**: só Windows 10 Pro 22H2 (10.0.19045). O `iniciar.sh` foi executado no Git Bash desse Windows, não em Linux nem macOS.

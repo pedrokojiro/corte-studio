@@ -143,3 +143,19 @@ def test_roteiro_com_voz_e_taxa_nulas_usa_padrao(tmp_path):
                  encoding="utf-8")
     r = D.carregar(p)
     assert r["voz"] == "pt-BR-AntonioNeural" and r["taxa"] == "-5%"
+
+
+# ---------------------------------------------------------------- interface: o JavaScript precisa ao menos compilar
+def test_javascript_da_pagina_compila(tmp_path):
+    import re
+    import shutil
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node não instalado: sem como checar a sintaxe do JavaScript")
+    html = (A.ROOT / "index.html").read_text(encoding="utf-8")
+    js = "\n".join(re.findall(r"<script>(.*?)</script>", html, re.S))
+    assert js.strip()
+    arq = tmp_path / "pagina.js"
+    arq.write_text(js, encoding="utf-8")
+    r = subprocess.run([node, "--check", str(arq)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr

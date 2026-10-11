@@ -160,7 +160,7 @@ async function envia(file){
   const r = await fetch('/upload', {method:'POST', body: fd});
   const j = await lerJSON(r);
   if(!r.ok) throw new Error(j.erro || 'Falha no envio');
-  espaco();
+  setTimeout(espaco, 0);  // depois de quem chamou guardar o id em S (mostra como preservado)
   return j;
 }
 function msg(t, cls){ $('msg').innerHTML = t ? `<span class="${cls||''}">${t}</span>` : ''; }
@@ -370,8 +370,7 @@ async function limpar(alvo){
 }
 $('bLimpaTmp').onclick = () => limpar('tmp');
 $('bLimpaUp').onclick = () => {
-  if(confirm('Apagar as cópias enviadas ao app (pasta uploads), menos as abertas nesta tela?
-Seus originais e os vídeos prontos não são tocados.')) limpar('uploads');
+  if(confirm('Apagar as cópias enviadas ao app (pasta uploads), menos as abertas nesta tela?\nSeus originais e os vídeos prontos não são tocados.')) limpar('uploads');
 };
 espaco();
 $('modo').onchange();
