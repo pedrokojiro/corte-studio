@@ -29,6 +29,10 @@ from urllib.parse import urlparse
 from flask import Flask, jsonify, request, send_file, abort
 from werkzeug.exceptions import HTTPException
 
+# Rodando como `python app.py`, este módulo é __main__; registra-o também como `app` para os módulos
+# do editor (que fazem `import app`) usarem esta mesma instância, e não uma segunda cópia.
+sys.modules.setdefault("app", sys.modules[__name__])
+
 ROOT = Path(__file__).resolve().parent
 UP, OUT, TMP = ROOT / "uploads", ROOT / "saida", ROOT / "tmp"
 for d in (UP, OUT, TMP):
@@ -844,6 +848,12 @@ def baixar(nome):
     if not NOME_SAIDA.fullmatch(nome) or not (OUT / nome).is_file():
         abort(404)
     return send_file(OUT / nome, conditional=True, as_attachment=request.args.get("dl") == "1")
+
+
+# Editor assistido e referências (módulos separados, mesmo servidor).
+import editor  # noqa: E402
+
+app.register_blueprint(editor.bp)
 
 
 if __name__ == "__main__":

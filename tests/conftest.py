@@ -28,11 +28,16 @@ def midia(tmp_path_factory):
 
 @pytest.fixture
 def studio(tmp_path, monkeypatch):
-    """Aponta uploads/saida/tmp do app para uma pasta temporária."""
+    """Aponta uploads/saida/tmp do app (e edicoes/cache do editor) para uma pasta temporária."""
     for nome, sub in (("UP", "uploads"), ("OUT", "saida"), ("TMP", "tmp")):
         p = tmp_path / sub
         p.mkdir()
         monkeypatch.setattr(A, nome, p)
+    import editor
+    monkeypatch.setattr(editor, "EDICOES", tmp_path / "edicoes")
+    monkeypatch.setattr(editor, "CACHE", tmp_path / "cache")
+    for sub in ("edicoes", "cache/transcricoes", "cache/previas", "cache/miniaturas", "cache/analises"):
+        (tmp_path / sub).mkdir(parents=True)
     return A
 
 

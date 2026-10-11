@@ -157,5 +157,6 @@ def test_javascript_da_pagina_compila(tmp_path):
     assert js.strip()
     arq = tmp_path / "pagina.js"
     arq.write_text(js, encoding="utf-8")
-    r = subprocess.run([node, "--check", str(arq)], capture_output=True, text=True)
-    assert r.returncode == 0, r.stderr
+    for alvo in (arq, A.ROOT / "editor.js"):
+        r = subprocess.run([node, "--check", str(alvo)], capture_output=True, text=True)
+        assert r.returncode == 0, f"{alvo.name}: {r.stderr}"
