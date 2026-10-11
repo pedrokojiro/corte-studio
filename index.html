@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corte Studio</title>
+<style>
+  :root{--bg:#10131a;--card:#181d27;--line:#2a3140;--txt:#e7eaf0;--mut:#8a93a6;--acc:#e0603f;--ok:#3fb27f;--warn:#e0b13f}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:baseline}
+  header h1{font-size:17px;margin:0}
+  header span{color:var(--mut);font-size:12px}
+  main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;padding:16px 20px;max-width:1400px;margin:0 auto}
+  @media(max-width:980px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+  .card h2{font-size:13px;margin:0 0 10px;color:var(--acc);text-transform:uppercase;letter-spacing:.04em}
+  label{display:block;color:var(--mut);font-size:12px;margin:8px 0 3px}
+  input[type=text],input[type=number],select,textarea{width:100%;background:#0e1118;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit}
+  textarea{min-height:120px;resize:vertical}
+  input[type=range]{width:100%}
+  button{background:#232a38;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 11px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--acc)}
+  button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600;padding:10px 14px;width:100%}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .row{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
+  .row>*{flex:1;min-width:90px}
+  .stage{position:relative;background:#000;border-radius:8px;overflow:hidden;display:inline-block;max-width:100%}
+  .stage video{display:block;max-width:100%;max-height:60vh}
+  .crop{position:absolute;top:0;bottom:0;border:2px solid var(--acc);background:rgba(224,96,63,.12);pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.55)}
+  .mut{color:var(--mut);font-size:12px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:#232a38}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:#e05a5a}
+  table{width:100%;border-collapse:collapse}
+  td,th{padding:5px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+  .legal{border-left:3px solid var(--warn);padding:8px 10px;background:#1d1a12;border-radius:4px;font-size:12px;color:#d9c48a;margin-bottom:8px}
+  #msg{min-height:20px;margin-top:8px}
+  #result video{width:100%;max-height:70vh;border-radius:8px;background:#000}
+  kbd{background:#232a38;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+</style>
+</head>
+<body>
+<header><h1>Corte Studio</h1><span>cortes 9:16, legenda, narração de IA e trilha. Roda local, no seu PC.</span></header>
+<main>
+<section>
+  <div class="card">
+    <h2>1. Vídeo e cortes</h2>
+    <input type="file" id="arq" accept="video/*,.mkv">
+    <div id="info" class="mut" style="margin-top:6px"></div>
+    <div style="margin-top:10px">
+      <div class="stage" id="stage" hidden>
+        <video id="vid" controls playsinline></video>
+        <div class="crop" id="crop"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div><label>Início (s)</label><input type="number" id="ini" step="0.1" min="0" value="0"></div>
+      <div><label>Fim (s)</label><input type="number" id="fim" step="0.1" min="0" value="0"></div>
+      <button id="bIni" title="atalho: I">Marcar início</button>
+      <button id="bFim" title="atalho: O">Marcar fim</button>
+      <button id="bAdd" class="pri" style="width:auto;padding:7px 12px" title="atalho: Enter">Adicionar corte</button>
+    </div>
+    <div class="mut" style="margin-top:6px">Atalhos: <kbd>I</kbd> início, <kbd>O</kbd> fim, <kbd>Enter</kbd> adicionar, <kbd>Espaço</kbd> play/pause.</div>
+    <table id="tab" style="margin-top:10px"><thead><tr><th>#</th><th>Início</th><th>Fim</th><th>Dur.</th><th></th></tr></thead><tbody></tbody></table>
+    <div id="total" class="mut" style="margin-top:6px"></div>
+    <div class="row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+      <div><label>Corte mín. (s)</label><input type="number" id="smin" min="1" step="1" value="15"></div>
+      <div><label>Corte máx. (s)</label><input type="number" id="smax" min="1" step="1" value="60"></div>
+      <button id="bSug">Sugerir cortes</button>
+    </div>
+    <div class="mut" style="margin-top:4px">Analisa trocas de cena e pausas de fala e sugere cortes que não interrompem frases. Não entende o conteúdo: confira cada um no "ver".</div>
+    <div id="sug" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Enquadramento 9:16</h2>
+    <label>Posição horizontal do recorte</label>
+    <input type="range" id="cx" min="0" max="1" step="0.01" value="0.5">
+    <div class="mut">A moldura laranja no vídeo mostra o que fica dentro do 9:16. Vale para todos os cortes.</div>
+  </div>
+</section>
+
+<aside>
+  <div class="card">
+    <h2>3. Narração e legenda</h2>
+    <label>Voz</label>
+    <select id="modo">
+      <option value="nenhuma">Sem narração: usar a fala do próprio vídeo</option>
+      <option value="ia">Gerar com IA (edge-tts)</option>
+      <option value="arquivo">Enviar áudio meu</option>
+    </select>
+    <div id="boxIA">
+      <label>Voz da IA</label>
+      <select id="voz">
+        <option value="pt-BR-AntonioNeural">Antonio (masculina)</option>
+        <option value="pt-BR-FranciscaNeural">Francisca (feminina)</option>
+      </select>
+      <label>Velocidade: <span id="txv">-5%</span></label>
+      <input type="range" id="taxa" min="-30" max="20" step="5" value="-5">
+    </div>
+    <div id="boxArq" hidden>
+      <label>Arquivo de áudio da narração</label>
+      <input type="file" id="narrArq" accept="audio/*">
+      <div id="narrInfo" class="mut"></div>
+    </div>
+    <div id="boxTxt">
+      <label id="txtLbl">Texto da narração (também vira legenda)</label>
+      <div id="boxTrans" class="row" style="margin-bottom:6px"><button id="bTrans">Transcrever fala</button><span id="transInfo" class="mut" style="flex:3"></span></div>
+      <textarea id="texto" placeholder="Escreva a narração original. Gancho nos primeiros 3 segundos."></textarea>
+      <div class="mut" id="estim"></div>
+    </div>
+    <div class="row">
+      <label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="leg" checked> Legenda</label>
+      <label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="mai" checked> Maiúsculas</label>
+    </div>
+    <label>Volume do áudio original: <span id="tvo">12%</span></label>
+    <input type="range" id="vo" min="0" max="100" step="1" value="12">
+  </div>
+
+  <div class="card">
+    <h2>4. Trilha (opcional)</h2>
+    <input type="file" id="musArq" accept="audio/*">
+    <div class="mut">Use trilha livre de direitos ou da biblioteca do TikTok.</div>
+    <label>Volume da trilha: <span id="tvm">10%</span></label>
+    <input type="range" id="vm" min="0" max="100" step="1" value="10">
+  </div>
+
+  <div class="card">
+    <button class="pri" id="go">Renderizar vídeo</button>
+    <div id="msg"></div>
+    <div id="result"></div>
+    <div class="mut" style="margin-top:8px">Depois de baixar: ative o toggle "conteúdo gerado por IA" no TikTok quando houver voz ou cena sintética.</div>
+  </div>
+</aside>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const S = {video: null, narr: null, mus: null, cortes: []};
+const fmt = t => { const m = Math.floor(t/60), s = (t%60).toFixed(1).padStart(4,'0'); return m+':'+s; };
+
+async function envia(file){
+  const fd = new FormData(); fd.append('arquivo', file);
+  const r = await fetch('/upload', {method:'POST', body: fd});
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.erro || 'Falha no envio');
+  return j;
+}
+function msg(t, cls){ $('msg').innerHTML = t ? `<span class="${cls||''}">${t}</span>` : ''; }
+
+$('arq').onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  msg('Enviando vídeo...'); $('sug').innerHTML = ''; SUG = [];
+  try{
+    S.video = await envia(f); S.cortes = []; renderTab();
+    $('vid').src = '/media/' + S.video.id; $('stage').hidden = false;
+    $('info').textContent = `${S.video.nome} | ${fmt(S.video.duracao)} | ${S.video.largura}x${S.video.altura}` + (S.video.tem_audio ? '' : ' | sem áudio');
+    $('fim').value = Math.min(5, S.video.duracao).toFixed(1);
+    msg('');
+  }catch(err){ msg(err.message, 'bad'); }
+};
+$('vid').addEventListener('loadedmetadata', moveCrop);
+window.addEventListener('resize', moveCrop);
+function moveCrop(){
+  const v = $('vid'), w = v.clientWidth, h = v.clientHeight; if(!w) return;
+  const bw = Math.min(w, h*9/16), cx = parseFloat($('cx').value);
+  const c = $('crop'); c.style.width = bw+'px'; c.style.left = ((w-bw)*cx)+'px';
+}
+$('cx').oninput = moveCrop;
+
+$('bIni').onclick = () => $('ini').value = $('vid').currentTime.toFixed(1);
+$('bFim').onclick = () => $('fim').value = $('vid').currentTime.toFixed(1);
+$('bAdd').onclick = () => {
+  if(!S.video) return msg('Envie um vídeo primeiro.', 'warn');
+  const ini = parseFloat($('ini').value), fim = parseFloat($('fim').value);
+  if(!(fim - ini >= 0.3)) return msg('O fim precisa ser maior que o início (mín. 0,3s).', 'warn');
+  S.cortes.push({ini, fim}); renderTab(); msg('');
+};
+function renderTab(){
+  if(S.tempos && S.tempSrc === 'video' && S.tempKey !== JSON.stringify(S.cortes)){ S.tempos = null; $('transInfo').innerHTML = '<span class="warn">Os cortes mudaram: clique em Transcrever de novo.</span>'; }
+  const tb = $('tab').querySelector('tbody'); tb.innerHTML = '';
+  S.cortes.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td><td>${fmt(c.ini)}</td><td>${fmt(c.fim)}</td><td>${(c.fim-c.ini).toFixed(1)}s</td>
+      <td style="text-align:right"><button data-go="${i}">ver</button> <button data-up="${i}">↑</button> <button data-rm="${i}">x</button></td>`;
+    tb.appendChild(tr);
+  });
+  const tot = S.cortes.reduce((a, c) => a + c.fim - c.ini, 0);
+  const cls = tot >= 61 ? 'ok' : 'warn';
+  $('total').innerHTML = S.cortes.length ? `Total dos cortes: <b class="${cls}">${tot.toFixed(1)}s</b> ` +
+    (tot >= 61 ? '(acima de 1 minuto)' : '(abaixo de 1 minuto: não conta para o Creator Rewards; a narração pode estender o vídeo)') : '';
+}
+$('tab').onclick = e => {
+  const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.rm !== undefined) S.cortes.splice(+b.dataset.rm, 1);
+  if(b.dataset.up !== undefined && +b.dataset.up > 0){ const i = +b.dataset.up; [S.cortes[i-1], S.cortes[i]] = [S.cortes[i], S.cortes[i-1]]; }
+  if(b.dataset.go !== undefined){ const c = S.cortes[+b.dataset.go]; $('vid').currentTime = c.ini; $('vid').play(); }
+  renderTab();
+};
+document.addEventListener('keydown', e => {
+  const t = e.target.tagName; if(t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+  if(e.key === 'i' || e.key === 'I') $('bIni').click();
+  else if(e.key === 'o' || e.key === 'O') $('bFim').click();
+  else if(e.key === 'Enter') $('bAdd').click();
+  else if(e.key === ' '){ e.preventDefault(); const v = $('vid'); v.paused ? v.play() : v.pause(); }
+});
+
+let SUG = [];
+$('bSug').onclick = async () => {
+  if(!S.video) return msg('Envie um vídeo primeiro.', 'warn');
+  $('bSug').disabled = true; $('sug').innerHTML = '<span class="mut">Analisando... em vídeo longo leva alguns minutos.</span>';
+  try{
+    const r = await fetch('/analisar', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({video_id: S.video.id, min: parseFloat($('smin').value), max: parseFloat($('smax').value)})});
+    const j = await r.json(); if(!r.ok) throw new Error(j.erro || 'Falha na análise');
+    SUG = j.sugestoes;
+    const cab = `<div class="mut">${j.cenas} trocas de cena, ${j.pausas} pausas, ${j.segundos}s de análise. ${SUG.length} sugestões.</div>`;
+    if(!SUG.length){ $('sug').innerHTML = cab + '<div class="warn">Nenhum corte limpo nessa faixa. Tente aumentar o máximo ou diminuir o mínimo.</div>'; }
+    else $('sug').innerHTML = cab + `<table><thead><tr><th>#</th><th>Início</th><th>Fim</th><th>Dur.</th><th>Por quê</th><th></th></tr></thead><tbody>` +
+      SUG.map((c, i) => `<tr><td>${i+1}</td><td>${fmt(c.ini)}</td><td>${fmt(c.fim)}</td><td>${c.dur.toFixed(1)}s</td><td class="mut">${c.motivo}</td>
+        <td style="text-align:right;white-space:nowrap"><button data-sv="${i}">ver</button> <button data-sa="${i}">+</button></td></tr>`).join('') +
+      `</tbody></table><button id="bSugAll" style="margin-top:6px">Adicionar todas</button>`;
+  }catch(err){ $('sug').innerHTML = `<span class="bad">${err.message}</span>`; }
+  $('bSug').disabled = false;
+};
+$('sug').onclick = e => {
+  const b = e.target.closest('button'); if(!b) return;
+  if(b.id === 'bSugAll'){ SUG.forEach(c => S.cortes.push({ini: c.ini, fim: c.fim})); renderTab(); return; }
+  if(b.dataset.sv !== undefined){ const c = SUG[+b.dataset.sv]; $('ini').value = c.ini; $('fim').value = c.fim; $('vid').currentTime = c.ini; $('vid').play(); }
+  if(b.dataset.sa !== undefined){ const c = SUG[+b.dataset.sa]; S.cortes.push({ini: c.ini, fim: c.fim}); renderTab(); b.disabled = true; }
+};
+
+$('modo').onchange = () => {
+  const m = $('modo').value;
+  $('boxIA').hidden = m !== 'ia'; $('boxArq').hidden = m !== 'arquivo'; $('boxTrans').hidden = m === 'ia';
+  $('txtLbl').textContent = m === 'ia' ? 'Texto da narração (também vira legenda)' :
+    m === 'arquivo' ? 'Legenda: clique em Transcrever (lê o seu áudio) e corrija o que estiver errado' :
+    'Legenda: adicione os cortes, clique em Transcrever e corrija o que estiver errado';
+  $('texto').placeholder = m === 'ia' ? 'Escreva a narração original. Gancho nos primeiros 3 segundos.' : 'O texto transcrito aparece aqui. Deixe vazio para não ter legenda.';
+  if(S.tempos && S.tempSrc !== (m === 'arquivo' ? 'narr' : 'video')){ S.tempos = null; $('transInfo').textContent = ''; }
+  $('vo').value = m === 'nenhuma' ? 100 : 12; $('tvo').textContent = $('vo').value + '%';
+};
+$('taxa').oninput = () => $('txv').textContent = ($('taxa').value >= 0 ? '+' : '') + $('taxa').value + '%';
+$('vo').oninput = () => $('tvo').textContent = $('vo').value + '%';
+$('vm').oninput = () => $('tvm').textContent = $('vm').value + '%';
+$('bTrans').onclick = async () => {
+  const m = $('modo').value;
+  if(!S.video) return msg('Envie um vídeo primeiro.', 'warn');
+  if(m === 'arquivo' && !S.narr) return msg('Envie o áudio da narração primeiro.', 'warn');
+  if(m === 'nenhuma' && !S.cortes.length) return msg('Adicione os cortes primeiro: a transcrição é só dos cortes.', 'warn');
+  const body = m === 'arquivo' ? {audio_id: S.narr.id} : {video_id: S.video.id, cortes: S.cortes};
+  $('bTrans').disabled = true; msg('');
+  $('transInfo').textContent = 'Transcrevendo... (na 1a vez carrega o modelo; leva cerca de 1/3 da duração do áudio)';
+  try{
+    const r = await fetch('/transcrever', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const j = await r.json(); if(!r.ok) throw new Error(j.erro || 'Falha na transcrição');
+    $('texto').value = j.texto; $('texto').oninput();
+    S.tempos = j.tempos; S.tempSrc = m === 'arquivo' ? 'narr' : 'video'; S.tempKey = JSON.stringify(S.cortes);
+    $('transInfo').innerHTML = `<span class="ok">Transcrito em ${j.segundos}s. Corrija o texto à vontade: a legenda continua sincronizada.</span>`;
+  }catch(err){ $('transInfo').innerHTML = `<span class="bad">${err.message}</span>`; }
+  $('bTrans').disabled = false;
+};
+$('texto').oninput = () => {
+  if($('modo').value !== 'ia'){ $('estim').textContent = ''; return; }
+  const n = $('texto').value.length;
+  $('estim').textContent = n ? `${n} caracteres, cerca de ${(n/15).toFixed(0)}s de fala [ESTIMATIVA]` : '';
+};
+$('narrArq').onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  try{ S.narr = await envia(f); if(S.tempSrc === 'narr') S.tempos = null; $('narrInfo').textContent = `${S.narr.nome} | ${fmt(S.narr.duracao)}`; }
+  catch(err){ msg(err.message, 'bad'); }
+};
+$('musArq').onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  try{ S.mus = await envia(f); }catch(err){ msg(err.message, 'bad'); }
+};
+
+$('go').onclick = async () => {
+  if(!S.video) return msg('Envie um vídeo.', 'warn');
+  if(!S.cortes.length) return msg('Adicione pelo menos um corte.', 'warn');
+  const modo = $('modo').value;
+  if(modo === 'arquivo' && !S.narr) return msg('Envie o áudio da narração.', 'warn');
+  const body = {
+    video_id: S.video.id, nome: S.video.nome.replace(/\.[^.]+$/, ''), nome_original: S.video.nome,
+    cortes: S.cortes, crop_x: parseFloat($('cx').value),
+    narracao: modo, texto: $('texto').value, voz: $('voz').value, taxa: ($('taxa').value >= 0 ? '+' : '') + $('taxa').value + '%',
+    audio_id: S.narr && S.narr.id, tempos: modo !== 'ia' ? S.tempos : null, legenda: $('leg').checked, maiuscula: $('mai').checked,
+    volume_original: $('vo').value / 100, musica_id: S.mus && S.mus.id, volume_musica: $('vm').value / 100
+  };
+  $('go').disabled = true; $('result').innerHTML = '';
+  msg('Renderizando... pode levar alguns minutos.');
+  try{
+    const r = await fetch('/render', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.erro || 'Falha no render');
+    msg(`Pronto: ${j.duracao.toFixed(1)}s. ` + (j.aviso ? `<span class="warn">${j.aviso}</span>` : ''), 'ok');
+    $('result').innerHTML = `<video controls src="/saida/${j.arquivo}"></video>
+      <p><a href="/saida/${j.arquivo}?dl=1" style="color:var(--acc)">Baixar ${j.arquivo}</a><br>
+      <span class="mut">Também salvo na pasta "saida" do app, com um registro .json.</span></p>`;
+  }catch(err){ msg(err.message, 'bad'); }
+  $('go').disabled = false;
+};
+$('modo').onchange();
+</script>
+</body>
+</html>

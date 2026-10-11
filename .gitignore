@@ -1,0 +1,29 @@
+# mídia do usuário e saídas (grandes e possivelmente de terceiros)
+uploads/*
+saida/*
+tmp/*
+!uploads/.keep
+!saida/.keep
+!tmp/.keep
+
+# projetos do pipeline: versiona roteiro.json e prompts.txt, não a mídia gerada
+projetos/**/*.png
+projetos/**/*.jpg
+projetos/**/*.jpeg
+projetos/**/*.webp
+projetos/**/*.mp3
+projetos/**/*.wav
+projetos/**/*.m4a
+projetos/**/tempos_*.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# sistema
+Thumbs.db
+desktop.ini
+.DS_Store
