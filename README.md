@@ -14,6 +14,20 @@ Duas ferramentas locais, sem conta, sem login e sem publicação automática (vo
    - Ele só reinstala quando `requirements.txt` ou `constraints.txt` mudam. Faltou ffmpeg, Python ou internet, ou a porta 5000 já está em uso (app aberto duas vezes)? A mensagem sai em português e a janela espera você ler.
    - A 1a transcrição baixa o modelo `small` do Whisper (~480 MB) do Hugging Face.
 
+## Executável para Windows (sem instalar Python)
+Gere com `construir_exe.bat` (precisa do `.venv` criado pelo `iniciar.bat` e do ffmpeg no PATH). Sai a pasta
+`dist\CorteStudio\` (~712 MB): `CorteStudio.exe`, `ffmpeg\` (ffmpeg + ffprobe que vão junto), `_internal\` e `LEIA-ME.txt`.
+- Abrir: dois cliques em `CorteStudio.exe` (janela preta = servidor; o navegador abre no editor). Fechar a janela encerra.
+  Abrir de novo com ele aberto só abre o navegador.
+- Dados (uploads, saída, projetos, cache, `config_local.env`) ficam AO LADO do .exe: mova a pasta inteira, e não a
+  deixe em "Arquivos de Programas" (sem permissão de escrita).
+- O modelo do Whisper (~480 MB) é baixado no primeiro uso para `%USERPROFILE%\.cache\huggingface`, como no app normal.
+- ffmpeg do gyan.dev (licença GPL): se repassar a pasta, ofereça o código-fonte do ffmpeg.
+- Testado em 2026-10-13 (esta máquina, Windows 10): o .exe rodou com o PATH só com as pastas do Windows (sem o ffmpeg
+  do sistema): upload, transcrição de um corte (Whisper + VAD empacotados), legenda, descoberta, prévia de trecho e
+  exportação 1080×1920. NÃO testado: outro PC sem Python, antivírus/SmartScreen (o .exe não é assinado e o Windows
+  pode avisar "aplicativo não reconhecido"), Windows 11.
+
 ## Editor assistido (`/editor`)
 Abra http://127.0.0.1:5000/editor (há um link "modo simples" de volta para a tela antiga, que continua funcionando).
 

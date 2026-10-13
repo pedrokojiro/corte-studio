@@ -21,6 +21,8 @@ iniciar.bat / ./iniciar.sh                       # cria .venv, instala requireme
 ```
 (No Linux/macOS: `.venv/bin/python`.) Ambiente testado: **só Windows 10**, Python 3.13.5, ffmpeg 9.0.2. Versões em `constraints.txt`. Exige Python 3.12+.
 
+Executável: `construir_exe.bat` → `construir_exe.py` + `corte_studio.spec` (PyInstaller fixado em `requirements-build.txt`) → `dist/CorteStudio/`. No app, `CONGELADO`/`RECURSOS` (páginas empacotadas) x `ROOT` (dados graváveis, ao lado do .exe); a pasta `ffmpeg/` do pacote entra no PATH. Página nova servida pelo Flask precisa entrar em `datas` do `.spec`.
+
 ## Interfaces estáveis (o que a próxima fase pode usar)
 - `POST /transcrever` `{video_id, cortes}` ou `{audio_id}` → `{texto, tempos:[[ini,fim,palavra]], chave}`. Os tempos estão na linha do tempo do vídeo final.
 - `POST /render` aceita `tempos` + `tempos_chave` (a `chave` acima). Se a chave não bater com os cortes/áudio atuais, o render transcreve de novo. Resposta: `{arquivo, duracao, avisos:[...], legenda_sync}`; `.json` com o mesmo nome em `saida/`.

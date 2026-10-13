@@ -1223,12 +1223,12 @@ def carregar_projeto(pid):
 # ---------------------------------------------------------------- rotas
 @bp.get("/editor")
 def pagina_editor():
-    return send_file(A.ROOT / "editor.html")
+    return send_file(A.RECURSOS / "editor.html")
 
 
 @bp.get("/editor.js")
 def script_editor():
-    return send_file(A.ROOT / "editor.js", mimetype="text/javascript")
+    return send_file(A.RECURSOS / "editor.js", mimetype="text/javascript")
 
 
 @bp.get("/api/presets")

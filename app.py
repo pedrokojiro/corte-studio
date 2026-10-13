@@ -33,7 +33,13 @@ from werkzeug.exceptions import HTTPException
 # do editor (que fazem `import app`) usarem esta mesma instância, e não uma segunda cópia.
 sys.modules.setdefault("app", sys.modules[__name__])
 
-ROOT = Path(__file__).resolve().parent
+# Executável (PyInstaller): as páginas vêm empacotadas (somente leitura, em _MEIPASS) e os DADOS (uploads, saída,
+# cache, projetos, config_local.env) ficam na pasta do .exe. Rodando do código-fonte, as duas são a pasta do app.
+CONGELADO = getattr(sys, "frozen", False)
+RECURSOS = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+ROOT = Path(sys.executable).resolve().parent if CONGELADO else Path(__file__).resolve().parent
+if CONGELADO and (ROOT / "ffmpeg" / "ffmpeg.exe").exists():   # ffmpeg/ffprobe que vêm junto com o executável
+    os.environ["PATH"] = str(ROOT / "ffmpeg") + os.pathsep + os.environ.get("PATH", "")
 UP, OUT, TMP = ROOT / "uploads", ROOT / "saida", ROOT / "tmp"
 for d in (UP, OUT, TMP):
     d.mkdir(exist_ok=True)
@@ -728,7 +734,7 @@ def erro_inesperado(e):
 
 @app.get("/")
 def index():
-    return send_file(ROOT / "index.html")
+    return send_file(RECURSOS / "index.html")
 
 
 @app.post("/upload")
@@ -863,11 +869,25 @@ app.register_blueprint(conteudo.bp)
 
 if __name__ == "__main__":
     import socket
+    import webbrowser
     with socket.socket() as s:
         if s.connect_ex(("127.0.0.1", 5000)) == 0:
+            if CONGELADO:   # abriu o .exe de novo: o app já está rodando, só abre o navegador
+                print("O Corte Studio já está aberto: abrindo o navegador.")
+                if not os.environ.get("CORTE_SEM_NAVEGADOR"):
+                    webbrowser.open("http://127.0.0.1:5000/editor")
+                sys.exit(0)
             print("[ERRO] A porta 5000 já está em uso: o Corte Studio provavelmente já está aberto em outra janela.\n"
                   "       Use http://127.0.0.1:5000 ou feche a outra janela e abra de novo.")
             sys.exit(1)
+    if CONGELADO:
+        if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+            print("[ERRO] ffmpeg/ffprobe não encontrados (a pasta 'ffmpeg' ao lado do .exe sumiu?).")
+            input("Enter para fechar.")
+            sys.exit(1)
+        if not os.environ.get("CORTE_SEM_NAVEGADOR"):   # testes automáticos não abrem abas
+            threading.Timer(1.5, lambda: webbrowser.open("http://127.0.0.1:5000/editor")).start()
+        print("Corte Studio aberto no navegador. Para sair, feche esta janela.")
     if precisa_contorno_openmp():
         print("[AVISO] Rodando no Python do Anaconda: contorno de OpenMP ligado. Prefira iniciar.bat/.sh (.venv).")
     print("Corte Studio em http://127.0.0.1:5000  (Ctrl+C para sair)")
