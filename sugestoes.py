@@ -142,6 +142,20 @@ def _remover_trecho(segs, fonte, ini, fim):
     return out
 
 
+VISUAL_OK = ("estilo", "posicao_y", "tamanho", "destaque") + tuple(E.CAMPOS_VISUAIS)
+
+
+def _visual(op):
+    """Aparência do texto na tela vinda de uma sugestão: só chaves conhecidas; o validar_plano confere os valores."""
+    v = op.get("visual") or {}
+    if not isinstance(v, dict):
+        raise A.Erro("op.visual precisa ser objeto.")
+    desconhecidas = set(v) - set(VISUAL_OK)
+    if desconhecidas:
+        raise A.Erro(f"op.visual tem campo desconhecido: {sorted(desconhecidas)[0]}")
+    return dict(v)
+
+
 def aplicar_operacao(plano, op):
     """Aplica UMA operação do conjunto fechado e devolve um plano revalidado (o original não muda)."""
     p = E.validar_plano(copy.deepcopy(plano))
@@ -158,7 +172,7 @@ def aplicar_operacao(plano, op):
     elif tipo == "adicionar_titulo":
         texto = E._txt(op.get("texto"), "op.texto", 90)
         p["titulos"].append({"id": "t" + uuid.uuid4().hex[:10], "texto": texto, "ini": num("ini", 0, 600),
-                             "fim": num("fim", 0.2, 600), "origem": op.get("origem", "sugestao_local")})
+                             "fim": num("fim", 0.2, 600), "origem": op.get("origem", "sugestao_local"), **_visual(op)})
     elif tipo == "remover_trecho":                      # corta só o trecho; o resto do segmento fica
         if op.get("fonte") not in p["fontes"]:
             raise A.Erro("Fonte da operação não está no plano.")
@@ -179,9 +193,60 @@ def aplicar_operacao(plano, op):
             p["legenda"]["estilo"] = est
     elif tipo == "ativar_zoom":
         p["efeitos"]["zoom"] = {"ativo": True, "intensidade": num("intensidade", 0.02, 0.15)}
+    elif tipo == "adicionar_segmento":                  # corte sugerido entra no fim da linha do tempo
+        if op.get("fonte") not in p["fontes"]:
+            raise A.Erro("Fonte da operação não está no plano.")
+        p["segmentos"].append({"id": "s" + uuid.uuid4().hex[:10], "fonte": op["fonte"], "ini": num("ini"),
+                               "fim": num("fim")})
+    elif tipo == "definir_titulo":                      # troca o texto de UM título (só por ação explícita)
+        alvo = next((t for t in p["titulos"] if t["id"] == op.get("id")), None)
+        if not alvo:
+            raise A.Erro("Título não encontrado no plano.")
+        alvo["texto"] = E._txt(op.get("texto"), "op.texto", 90)
+        alvo["origem"] = op.get("origem", "sugestao_local")
+        alvo.update(_visual(op))
+    elif tipo == "adicionar_efeito":
+        if op.get("fonte") is not None and op.get("fonte") not in p["fontes"]:
+            raise A.Erro("Fonte da operação não está no plano.")
+        p["audio"]["efeitos"].append({"id": "e" + uuid.uuid4().hex[:10], "som": op.get("som"),
+                                      "arquivo": op.get("arquivo"), "fonte": op.get("fonte"), "t": num("t"),
+                                      "dur": num("dur", 0.1, 10), "volume": num("volume", 0, 1),
+                                      "objetivo": str(op.get("objetivo") or "")[:200],
+                                      "origem": op.get("origem", "sugestao_local")})
+    elif tipo == "remover_efeito":
+        antes = len(p["audio"]["efeitos"])
+        p["audio"]["efeitos"] = [e for e in p["audio"]["efeitos"] if e["id"] != op.get("id")]
+        if len(p["audio"]["efeitos"]) == antes:
+            raise A.Erro("Efeito não encontrado no plano.")
+    elif tipo == "ajustar_audio":                       # tratamento: só chaves conhecidas, só true/false
+        mapa_aud = {"realce_voz": ("realce_voz",), "normalizar": ("normalizar",),
+                    "abaixar_na_fala": ("musica", "abaixar_na_fala")}
+        mudou = False
+        for k, caminho in mapa_aud.items():
+            if k in op:
+                alvo = p["audio"]
+                for c in caminho[:-1]:
+                    alvo = alvo[c]
+                alvo[caminho[-1]] = E._bool(op[k], f"op.{k}")
+                mudou = True
+        if not mudou:
+            raise A.Erro("ajustar_audio sem nenhum ajuste conhecido.")
     else:
         raise A.Erro(f"Operação desconhecida: {tipo!r}.")
     return E.validar_plano(p)
+
+
+def aplicar_operacoes(plano, ops):
+    """Uma edição completa proposta = várias operações, aplicadas em ordem; se uma falhar, nada é aplicado."""
+    if not isinstance(ops, list) or not 1 <= len(ops) <= 20:
+        raise A.Erro("Envie de 1 a 20 operações.")
+    p = plano
+    for i, op in enumerate(ops):
+        try:
+            p = aplicar_operacao(p, op)
+        except A.Erro as e:
+            raise A.Erro(f"Operação {i + 1} de {len(ops)} recusada (nada foi aplicado): {e}")
+    return p
 
 
 # ---------------------------------------------------------------- meu vídeo x referências
@@ -208,7 +273,7 @@ def repeticoes_no_plano(plano):
     p = E.validar_plano(plano)
     out = []
     for fonte in p["fontes"]:
-        d = E.transcricao_em_cache(fonte)
+        d = E.transcricao_combinada(fonte)
         if not d:
             continue
         dentro = [w for w in d["palavras"]
@@ -235,7 +300,7 @@ def recomendacoes(plano, comparacao):
     vals = [r["metricas"]["primeira_fala_s"] for r in analisadas if r["metricas"].get("primeira_fala_s") is not None]
     if meu["primeira_fala_s"] is not None and vals and meu["primeira_fala_s"] > max(vals) and meu["primeira_fala_s"] > 0.8:
         s0 = p["segmentos"][0]
-        d = E.transcricao_em_cache(s0["fonte"])
+        d = E.transcricao_combinada(s0["fonte"])
         prim = next((w for w in (d or {}).get("palavras", []) if s0["ini"] <= w[0] < s0["fim"]), None)
         if prim and prim[0] - 0.15 > s0["ini"]:
             h = hip.get("primeira_fala_s")
@@ -267,6 +332,41 @@ def recomendacoes(plano, comparacao):
         nova("Zoom leve nos planos longos",
              f"Seus segmentos duram em média {meu['plano_medio_s']:.1f}s. Um zoom lento e contido dá movimento sem cortar conteúdo.",
              [{"hipotese": h["texto"]}], {"tipo": "ativar_zoom", "intensidade": 0.05}, forca=f"evidência {h['evidencia']}")
+    # 5) características observadas pelo Gemini nas referências: com desempenho comparável vira HIPÓTESE
+    #    ("as de mais views/dia tinham X"); sem métricas, só PADRÃO observado (inspiração, sem relação com desempenho).
+    feitos = {r["titulo"] for r in rec}
+    s0 = p["segmentos"][0] if p["segmentos"] else None
+    dd = E.transcricao_combinada(s0["fonte"]) if s0 else None
+    prim = next((w for w in (dd or {}).get("palavras", []) if s0["ini"] <= w[0] < s0["fim"]), None) if s0 else None
+    origens = [(h["metrica"], [{"hipotese": h["texto"]}], f"evidência {h['evidencia']}", "As referências com mais views/dia")
+               for h in comparacao["hipoteses"] if h.get("tipo") == "caracteristica_observada" and h["direcao"] == "presente"]
+    origens += [(x["metrica"], [{"padrao": x["texto"]}], f"padrão em {x['n']} de {x['de']} referências (sem dado de desempenho)",
+                 f"{x['n']} de {x['de']} referências analisadas") for x in comparacao.get("padroes") or []]
+    for k, ev, forca, quem in origens:
+        if k == "legenda_queimada" and not meu["legenda_ativa"] and "Ligar a legenda" not in feitos:
+            nova("Ligar a legenda", f"{quem} tinham legenda na tela (observado pelo Gemini).",
+                 ev, {"tipo": "ativar_legenda", "preset": "classico"}, forca=forca)
+        elif k == "texto_na_tela_no_inicio" and not any(t["ini"] < 1 for t in p["titulos"]) and "Texto na tela logo no início" not in feitos:
+            nova("Texto na tela logo no início",
+                 f"{quem} mostravam texto na tela no começo. Use “Sugerir” na aba Texto na tela: o texto sai da fala do "
+                 "seu corte; nada é inventado aqui.", ev, None, forca=forca)
+        elif k == "fala_nos_3s" and meu["primeira_fala_s"] is not None and meu["primeira_fala_s"] > 3 \
+                and not feitos & {"Começar já na fala", "Fala nos 3 primeiros segundos"}:
+            op = ({"tipo": "cortar_inicio", "novo_ini": round(prim[0] - 0.15, 2)}
+                  if prim and prim[0] - 0.15 > s0["ini"] and prim[0] - 0.15 < s0["fim"] - 0.3 else None)
+            nova("Fala nos 3 primeiros segundos",
+                 f"Seu vídeo leva {meu['primeira_fala_s']:.1f}s até a primeira fala; {quem} falavam logo de cara. "
+                 + (f"A mudança começa o 1o corte em {prim[0] - 0.15:.1f}s da fonte (logo antes de “{prim[2]}”)."
+                    if op else "Veja os ganchos (aba Cortes) para abrir com uma fala do próprio corte."),
+                 ev, op, [s0["ini"], prim[0]] if op else None, forca=forca)
+        elif k == "efeitos_sonoros" and not p["audio"]["efeitos"] and "Efeitos sonoros com propósito" not in feitos:
+            nova("Efeitos sonoros com propósito",
+                 f"{quem} usavam efeitos sonoros. Use “Sugerir áudio” (aba Áudio e efeitos): só entram efeitos com "
+                 "motivo claro, sem cobrir a fala.", ev, None, forca=forca)
+        elif k == "musica_de_fundo" and not p["audio"]["musica"]["id"] and "Música de fundo" not in feitos:
+            nova("Música de fundo", f"{quem} tinham música de fundo. Isso exige um arquivo que você tenha direito "
+                 "de usar (o app não fornece música).", ev, None, forca=forca)
+        feitos = {r["titulo"] for r in rec}
     return {"meu": meu, "recomendacoes": rec}
 
 
@@ -288,20 +388,6 @@ def rota_ganchos():
 @bp.post("/api/operacao")
 def rota_operacao():
     j = A.corpo_json()
+    if j.get("operacoes") is not None:
+        return jsonify({"plano": aplicar_operacoes(j.get("plano"), j["operacoes"])})
     return jsonify({"plano": aplicar_operacao(j.get("plano"), j.get("operacao"))})
-
-
-@bp.post("/api/comparar")
-def rota_comparar():
-    j = A.corpo_json()
-    ids = j.get("referencias") or []
-    if not isinstance(ids, list) or len(ids) > 30:
-        raise A.Erro("Lista de referências inválida.")
-    refs = [R.ler_ref(i) for i in ids]
-    if not refs:
-        raise A.Erro("Adicione pelo menos uma referência.")
-    comp = R.comparar(refs)
-    if j.get("plano"):
-        rec = recomendacoes(j["plano"], comp)
-        comp["meu"], comp["recomendacoes"] = rec["meu"], rec["recomendacoes"]
-    return jsonify(comp)

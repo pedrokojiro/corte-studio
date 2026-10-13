@@ -852,12 +852,13 @@ def baixar(nome):
 
 # Editor assistido e referências (módulos separados, mesmo servidor).
 import editor  # noqa: E402
-import referencias  # noqa: E402
+import referencias  # noqa: E402,F401  (biblioteca: cliente Gemini e credenciais; sem rotas)
 import sugestoes  # noqa: E402
+import conteudo  # noqa: E402
 
 app.register_blueprint(editor.bp)
-app.register_blueprint(referencias.bp)
 app.register_blueprint(sugestoes.bp)
+app.register_blueprint(conteudo.bp)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,72 @@
+{
+ "versao": 1,
+ "anotado_em": "2026-10-12",
+ "como": "Fronteiras de assunto anotadas à mão lendo a transcrição (unidades de até 10 s). 'fortes' = troca clara de assunto; 'fracas' = subtópico (achar conta, perder não pune). Tempos em segundos da fonte.",
+ "casos": {
+  "efootball": {
+   "hash": "3309ca1b84670162faabe9e1087686a8",
+   "descricao": "gameplay narrado (mod de eFootball), 13 min",
+   "tolerancia_s": 8,
+   "fortes": [
+    24.2,
+    50.84,
+    104.0,
+    173.8,
+    257.18,
+    290.72,
+    359.98,
+    428.76,
+    497.82,
+    634.15,
+    704.05,
+    727.63
+   ],
+   "fracas": [
+    150.06
+   ]
+  },
+  "entrevista": {
+   "hash": "5454d458cca6b6e82fc54328ed860b92",
+   "descricao": "entrevista (ex-satanista), 18 min",
+   "tolerancia_s": 10,
+   "fortes": [
+    22.31,
+    88.61,
+    160.57,
+    332.81,
+    396.37,
+    522.69,
+    591.31,
+    614.01,
+    684.13,
+    787.51,
+    827.91,
+    1015.24
+   ],
+   "fracas": [
+    131.65,
+    256.77,
+    476.41,
+    486.93,
+    744.17,
+    948.84
+   ]
+  },
+  "treinador": {
+   "hash": "4e6becaa78982d327e76ff61b7dbba79",
+   "descricao": "entrevista (treinador no Catar), 6:44 — CONTROLE: não usado no ajuste",
+   "tolerancia_s": 10,
+   "fortes": [
+    90.35,
+    128.62,
+    229.26,
+    293.09,
+    354.9
+   ],
+   "fracas": [
+    189.57,
+    327.29
+   ]
+  }
+ }
+}

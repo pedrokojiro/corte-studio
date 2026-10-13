@@ -27,7 +27,8 @@ import tarefas as T
 REFS = A.ROOT / "referencias"
 REFS.mkdir(exist_ok=True)
 bp = Blueprint("referencias", __name__)
-VERSAO_ANALISE = 1  # muda quando o método muda: invalida o cache
+VERSAO_ANALISE = 1  # muda quando o método muda: invalida o cache (análise local)
+VERSAO_GEMINI = 2   # v2: o prompt passou a pedir características observáveis (comparação entre referências)
 CATEGORIAS = ("gancho", "contexto", "narrativa", "entrega", "ritmo", "repeticao", "legenda", "enquadramento",
               "efeitos", "fala", "audio", "final")
 
@@ -170,6 +171,109 @@ def metadados_youtube(vid, tarefa=None):
     return meta, None
 
 
+def gemini_busca(tarefa, prompt):
+    """Gemini com a ferramenta oficial de Busca Google (grounding). Devolve (json, modelo, fontes), em que `fontes`
+    traz SÓ o que a API registrou: consultas feitas, citações (url, título) e o HTML de sugestões de busca que os
+    termos pedem para exibir. Cobrança: por busca executada (há cota mensal grátis; ver README)."""
+    chave = credencial("GEMINI_API_KEY")
+    if not chave:
+        raise SemProvedor("Sem GEMINI_API_KEY: a Busca Google pelo Gemini não está disponível.")
+    modelo = status_config()["gemini_modelo"]
+    corpo = {"model": modelo, "input": [{"type": "text", "text": prompt}], "tools": [{"type": "google_search"}]}
+    j = requisitar_json("POST", "https://generativelanguage.googleapis.com/v1beta/interactions", tarefa=tarefa,
+                        timeout=300, corpo=json.dumps(corpo).encode(),
+                        cabecalhos={"x-goog-api-key": chave, "Content-Type": "application/json"})
+    consultas, citacoes, sugestoes = [], [], None
+    for passo in j.get("steps") or []:
+        if not isinstance(passo, dict):
+            continue
+        if passo.get("type") == "google_search_call":
+            q = (passo.get("arguments") or {}).get("queries") or []
+            consultas += [x for x in q if isinstance(x, str)]
+        elif passo.get("type") == "google_search_result":
+            for r in passo.get("result") or [passo]:
+                if isinstance(r, dict) and isinstance(r.get("search_suggestions"), str):
+                    sugestoes = r["search_suggestions"]
+        elif passo.get("type") == "model_output":
+            for c in passo.get("content") or []:
+                for an in (c.get("annotations") or []) if isinstance(c, dict) else []:
+                    if isinstance(an, dict) and an.get("type") == "url_citation" and isinstance(an.get("url"), str):
+                        citacoes.append({"url": an["url"][:500], "titulo": str(an.get("title") or "")[:200]})
+    vistos, unicas = set(), []
+    for c in citacoes:
+        if c["url"] not in vistos:
+            vistos.add(c["url"])
+            unicas.append(c)
+    return json_do_texto(_texto_interacao(j)), modelo, {"consultas": consultas[:20], "citacoes": unicas[:30],
+                                                        "sugestoes_html": (sugestoes or "")[:20000] or None}
+
+
+def oembed_youtube(vid, tarefa=None):
+    """Confirma, pelo oEmbed oficial do YouTube (sem chave), que o vídeo existe e é público/incorporável.
+    Devolve título e canal; NÃO traz views nem data."""
+    url = "https://www.youtube.com/oembed?" + urllib.parse.urlencode(
+        {"url": f"https://www.youtube.com/watch?v={vid}", "format": "json"})
+    try:
+        j = requisitar_json("GET", url, tarefa=tarefa, tentativas=2, timeout=20)
+    except ErroHTTP as e:
+        return None, str(e)
+    if not j.get("title"):
+        return None, "o oEmbed não reconheceu o vídeo"
+    return {"titulo": str(j["title"])[:200], "canal": str(j.get("author_name") or "")[:120],
+            "canal_url": j.get("author_url"), "fonte": "YouTube oEmbed", "consultado_em": agora_iso()}, None
+
+
+def _meta_item(v, consultado):
+    sn, stt, cd = v.get("snippet", {}), v.get("statistics", {}), v.get("contentDetails", {})
+    dig = lambda k: int(stt[k]) if str(stt.get(k, "")).isdigit() else None  # noqa: E731
+    return {"fonte": "YouTube Data API v3 (videos.list)", "titulo": sn.get("title"), "canal": sn.get("channelTitle"),
+            "canal_id": sn.get("channelId"), "publicado_em": sn.get("publishedAt"),
+            "duracao_s": _iso_duracao(cd.get("duration")),
+            "idioma_audio": sn.get("defaultAudioLanguage") or sn.get("defaultLanguage"),
+            "views": dig("viewCount"), "likes": dig("likeCount"), "comentarios": dig("commentCount"),
+            "inscritos": None, "consultado_em": consultado}
+
+
+def buscar_youtube(consulta, tarefa=None, maximo=15, idioma="pt", regiao="BR"):
+    """search.list oficial (vídeos curtos, < 4 min). A busca NÃO traz views: só os ids."""
+    chave = credencial("YOUTUBE_API_KEY")
+    if not chave:
+        raise SemProvedor("Sem YOUTUBE_API_KEY: a busca no YouTube não foi feita.")
+    j = requisitar_json("GET", "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode(
+        {"part": "snippet", "q": consulta, "type": "video", "videoDuration": "short", "relevanceLanguage": idioma,
+         "regionCode": regiao, "maxResults": maximo, "key": chave}), tarefa=tarefa)
+    return [it["id"]["videoId"] for it in j.get("items") or []
+            if isinstance(it.get("id"), dict) and re.fullmatch(r"[A-Za-z0-9_-]{11}", str(it["id"].get("videoId", "")))]
+
+
+def detalhes_youtube(ids, tarefa=None):
+    """videos.list + channels.list em lote (até 50 por chamada): views, data, duração e inscritos públicos."""
+    chave = credencial("YOUTUBE_API_KEY")
+    if not chave:
+        raise SemProvedor("Sem YOUTUBE_API_KEY.")
+    base, agora, metas = "https://www.googleapis.com/youtube/v3/", agora_iso(), {}
+    for k in range(0, len(ids), 50):
+        j = requisitar_json("GET", base + "videos?" + urllib.parse.urlencode(
+            {"part": "snippet,statistics,contentDetails", "id": ",".join(ids[k:k + 50]), "key": chave}), tarefa=tarefa)
+        for v in j.get("items") or []:
+            metas[v["id"]] = _meta_item(v, agora)
+    canais = sorted({m["canal_id"] for m in metas.values() if m.get("canal_id")})
+    insc = {}
+    for k in range(0, len(canais), 50):
+        try:
+            c = requisitar_json("GET", base + "channels?" + urllib.parse.urlencode(
+                {"part": "statistics", "id": ",".join(canais[k:k + 50]), "key": chave}), tarefa=tarefa)
+        except ErroHTTP:
+            break  # inscritos é complemento
+        for it in c.get("items") or []:
+            cs = it.get("statistics", {})
+            if not cs.get("hiddenSubscriberCount") and str(cs.get("subscriberCount", "")).isdigit():
+                insc[it["id"]] = int(cs["subscriberCount"])
+    for m in metas.values():
+        m["inscritos"] = insc.get(m.get("canal_id"))
+    return metas
+
+
 def metadados_tiktok(url, tarefa=None):
     j = requisitar_json("GET", "https://www.tiktok.com/oembed?" + urllib.parse.urlencode({"url": url}), tarefa=tarefa)
     if not j.get("title") and not j.get("author_name"):
@@ -299,7 +403,10 @@ Responda APENAS com um objeto JSON neste formato (sem texto fora do JSON):
 {"resumo": "até 3 frases",
  "observacoes": [{"t": "MM:SS", "categoria": "gancho|contexto|narrativa|entrega|ritmo|repeticao|legenda|enquadramento|efeitos|fala|audio|final", "texto": "o que acontece nesse instante"}],
  "legenda_queimada": {"presente": true/false/null, "descricao": "fonte, cor, posição, legibilidade, se houver"},
- "promessa_e_entrega": {"promessa": "o que o início promete", "t_promessa": "MM:SS ou null", "entrega": "se e quando entrega", "t_entrega": "MM:SS ou null"}}
+ "promessa_e_entrega": {"promessa": "o que o início promete", "t_promessa": "MM:SS ou null", "entrega": "se e quando entrega", "t_entrega": "MM:SS ou null"},
+ "caracteristicas": {"fala_nos_3s": true/false/null, "texto_na_tela_no_inicio": true/false/null, "rosto_em_cena": true/false/null,
+                     "musica_de_fundo": true/false/null, "narracao_em_off": true/false/null, "efeitos_sonoros": true/false/null}}
+Em "caracteristicas", use null quando não der para observar com segurança.
 Cubra: o gancho de abertura e quando o contexto fica claro; a progressão e se a promessa é entregue; ritmo, repetições e cortes;
 aparência, legibilidade e posição das legendas; enquadramento, efeitos visuais, fala e tratamento de áudio. De 6 a 25 observações, em ordem de tempo."""
 
@@ -316,8 +423,8 @@ def _t_mmss(v, dur):
     return round(t, 1)
 
 
-def validar_resposta_gemini(texto, dur=None):
-    """Valida o que o modelo devolveu. Observação inválida é descartada (e contada); estrutura inválida é erro."""
+def json_do_texto(texto):
+    """O JSON que o modelo devolveu (aceita bloco ```json```). Resposta vazia ou não-JSON é erro 502."""
     if not isinstance(texto, str) or not texto.strip():
         raise A.Erro("O provedor devolveu resposta vazia.", 502)
     bruto = texto.strip()
@@ -325,9 +432,20 @@ def validar_resposta_gemini(texto, dur=None):
     if m:
         bruto = m.group(1)
     try:
-        j = json.loads(bruto)
+        return json.loads(bruto)
     except ValueError:
         raise A.Erro("A resposta do provedor não é JSON válido; nada foi registrado.", 502)
+
+
+CARACTERISTICAS = {"fala_nos_3s": "fala nos 3 primeiros segundos", "texto_na_tela_no_inicio": "texto na tela no início",
+                   "rosto_em_cena": "rosto em cena", "musica_de_fundo": "música de fundo",
+                   "narracao_em_off": "narração em off", "efeitos_sonoros": "efeitos sonoros",
+                   "legenda_queimada": "legenda na tela"}
+
+
+def validar_resposta_gemini(texto, dur=None):
+    """Valida o que o modelo devolveu. Observação inválida é descartada (e contada); estrutura inválida é erro."""
+    j = json_do_texto(texto)
     if not isinstance(j, dict) or not isinstance(j.get("observacoes"), list):
         raise A.Erro("A resposta do provedor não tem a lista 'observacoes'; nada foi registrado.", 502)
     obs, descartadas = [], 0
@@ -357,6 +475,9 @@ def validar_resposta_gemini(texto, dur=None):
                                  "descricao": str(leg.get("descricao") or "")[:300]},
             "promessa_e_entrega": {"promessa": str(pe.get("promessa") or "")[:300], "t_promessa": t_ou_none(pe.get("t_promessa")),
                                    "entrega": str(pe.get("entrega") or "")[:300], "t_entrega": t_ou_none(pe.get("t_entrega"))},
+            "caracteristicas": {k: v for k, v in (j.get("caracteristicas") or {}).items()
+                                if k in CARACTERISTICAS and isinstance(v, bool)}
+            if isinstance(j.get("caracteristicas"), dict) else {},
             "descartadas": descartadas}
 
 
@@ -367,7 +488,38 @@ def _texto_interacao(j):
             for c in passo.get("content") or []:
                 if isinstance(c, dict) and isinstance(c.get("text"), str):
                     partes.append(c["text"])
+    if not partes:  # formatos alternativos documentados nos SDKs (output_text / outputs)
+        if isinstance(j.get("output_text"), str):
+            partes.append(j["output_text"])
+        for c in j.get("outputs") or []:
+            if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str):
+                partes.append(c["text"])
     return "\n".join(partes)
+
+
+class SemProvedor(A.Erro):
+    """Provedor não configurado: quem chamou decide se cai na heurística local (e avisa)."""
+    def __init__(self, msg):
+        super().__init__(msg, 503)
+
+
+def gemini_json(tarefa, prompt, imagens=(), temperatura=None):
+    """Uma chamada de TEXTO (e, só com consentimento, imagens JPEG inline) ao Gemini; devolve (json, modelo).
+    A chave fica no backend; quem valida o conteúdo da resposta é quem chamou."""
+    import base64
+    chave = credencial("GEMINI_API_KEY")
+    if not chave:
+        raise SemProvedor("Sem GEMINI_API_KEY: análise por modelo indisponível (configure em config_local.env).")
+    modelo = status_config()["gemini_modelo"]
+    entrada = [{"type": "text", "text": prompt}] + [
+        {"type": "image", "data": base64.b64encode(img).decode("ascii"), "mime_type": "image/jpeg"} for img in imagens]
+    corpo = {"model": modelo, "input": entrada}
+    if temperatura is not None:
+        corpo["generation_config"] = {"temperature": temperatura}
+    j = requisitar_json("POST", "https://generativelanguage.googleapis.com/v1beta/interactions", tarefa=tarefa,
+                        timeout=300, corpo=json.dumps(corpo).encode(),
+                        cabecalhos={"x-goog-api-key": chave, "Content-Type": "application/json"})
+    return json_do_texto(_texto_interacao(j)), modelo
 
 
 def analisar_gemini(tarefa, ref, permitir_envio=False):
@@ -424,7 +576,8 @@ def analisar_gemini(tarefa, ref, permitir_envio=False):
            "O provedor amostra o vídeo (por padrão ~1 quadro/s): cortes muito rápidos podem passar despercebidos."]
     if r["descartadas"]:
         lim.append(f"{r['descartadas']} observação(ões) da resposta foram descartadas por formato ou tempo inválido.")
-    return {"provedor": "gemini", "modelo": modelo, "versao": VERSAO_ANALISE, "criado_em": agora_iso(),
+    return {"provedor": "gemini", "modelo": modelo, "versao": VERSAO_GEMINI, "criado_em": agora_iso(),
+            "caracteristicas": r["caracteristicas"],
             "envio": envio, "resumo": r["resumo"], "observacoes": r["observacoes"],
             "legenda_queimada": r["legenda_queimada"], "promessa_e_entrega": r["promessa_e_entrega"],
             "limitacoes": lim, "metodo": f"Gemini ({modelo}) via Interactions API."}
@@ -502,7 +655,8 @@ def _chave_cache(ref, provedor):
     else:
         ident = "url:" + ref["url"]
     extra = status_config()["gemini_modelo"] if provedor == "gemini" else A.MODELO_WHISPER
-    return re.sub(r"[^A-Za-z0-9]", "_", f"{provedor}_{VERSAO_ANALISE}_{extra}_{ident}")[:150]
+    versao = VERSAO_GEMINI if provedor == "gemini" else VERSAO_ANALISE
+    return re.sub(r"[^A-Za-z0-9]", "_", f"{provedor}_{versao}_{extra}_{ident}")[:150]
 
 
 def analisar_ref(tarefa, rid, provedor, permitir_envio=False):
@@ -595,17 +749,31 @@ def metricas_ref(ref):
     return (ref.get("analises", {}).get("local") or {}).get("metricas") or {}
 
 
+def caracteristicas_ref(r):
+    """Características booleanas observadas pelo provedor (Gemini) ou marcadas por você (legenda)."""
+    g = (r.get("analises") or {}).get("gemini") or {}
+    out = dict(g.get("caracteristicas") or {})
+    leg = (g.get("legenda_queimada") or {}).get("presente")
+    if isinstance(leg, bool):
+        out["legenda_queimada"] = leg
+    tag = (r.get("tags") or {}).get("legenda")
+    if "legenda_queimada" not in out and tag in ("sim", "não"):
+        out["legenda_queimada"] = tag == "sim"
+    return out
+
+
 def comparar(refs, meu=None):
     linhas = [{"id": r["id"], "nome": r.get("nome"), "tipo": r["tipo"], "desempenho": desempenho(r),
                "metricas": metricas_ref(r), "tags": r.get("tags") or {},
                "legenda_queimada": ((r.get("analises", {}).get("gemini") or {}).get("legenda_queimada") or {}).get("presente"),
+               "caracteristicas": caracteristicas_ref(r),
                "analisado": sorted((r.get("analises") or {}).keys())} for r in refs]
     notas, hipoteses = [], []
-    comp = [l for l in linhas if l["desempenho"]["views_por_dia"] is not None and l["metricas"]]
+    comp = [l for l in linhas if l["desempenho"]["views_por_dia"] is not None and (l["metricas"] or l["caracteristicas"])]
     if len(refs) == 1:
         notas.append("Análise de UMA referência só: não há comparação de desempenho; as observações servem de inspiração, não de evidência.")
     if len(comp) < 2:
-        notas.append("Para formular hipóteses são precisas pelo menos 2 referências com análise local E views + data de publicação "
+        notas.append("Para formular hipóteses são precisas pelo menos 2 referências com análise (local ou Gemini) E views + data de publicação "
                      f"(hoje: {len(comp)}).")
     else:
         dias = [l["desempenho"]["dias_no_ar"] for l in comp]
@@ -639,19 +807,37 @@ def comparar(refs, meu=None):
                     "evidencia": "muito fraca" if n <= 3 else "fraca",
                     "por_que": (f"Correlação em só {n} vídeos, sem dados de distribuição, promoção, público ou retenção. "
                                 "Pode ser coincidência ou efeito de outra diferença (tema, canal, data).")})
+        for k, rot in CARACTERISTICAS.items():
+            va = [l["caracteristicas"].get(k) for l in alto]
+            vb = [l["caracteristicas"].get(k) for l in baixo]
+            if any(v is None for v in va + vb):
+                continue
+            if (all(va) and not any(vb)) or (not any(va) and all(vb)):
+                direcao = "presente" if all(va) else "ausente"
+                n = len(comp)
+                hipoteses.append({
+                    "metrica": k, "direcao": direcao, "tipo": "caracteristica_observada",
+                    "texto": (f"Nas referências com mais views/dia, {rot} esteve {direcao} "
+                              f"({', '.join(l['nome'] for l in alto)}); nas com menos, "
+                              f"{'ausente' if direcao == 'presente' else 'presente'} ({', '.join(l['nome'] for l in baixo)})."),
+                    "evidencia": "muito fraca" if n <= 3 else "fraca",
+                    "por_que": (f"Observação do modelo de IA (pode errar) em só {n} vídeos, sem dados de distribuição, "
+                                "público ou retenção. Pode ser coincidência ou efeito de outra diferença.")})
         if not hipoteses:
             notas.append("Nenhuma característica medida separou os vídeos de mais e menos views/dia: sem hipótese a propor.")
     notas.append("Não sabemos como cada plataforma distribuiu esses vídeos, se houve promoção paga, nem a retenção: "
                  "qualquer explicação de desempenho é hipótese, não causa.")
-    return {"referencias": linhas, "hipoteses": hipoteses, "notas": notas, "meu": meu}
+    # Padrões comuns entre as referências ANALISADAS (sem relação com desempenho): servem de inspiração.
+    padroes = []
+    for k, rot in CARACTERISTICAS.items():
+        vals = [l["caracteristicas"][k] for l in linhas if l["caracteristicas"].get(k) is not None]
+        if len(vals) >= 2 and sum(vals) / len(vals) >= 2 / 3:
+            padroes.append({"metrica": k, "n": sum(vals), "de": len(vals),
+                            "texto": f"{rot}: presente em {sum(vals)} de {len(vals)} referências analisadas pelo Gemini."})
+    return {"referencias": linhas, "hipoteses": hipoteses, "padroes": padroes, "notas": notas, "meu": meu}
 
 
 # ---------------------------------------------------------------- rotas
-@bp.get("/api/config")
-def rota_config():
-    return jsonify(status_config())
-
-
 @bp.get("/api/referencias")
 def rota_refs():
     out = []

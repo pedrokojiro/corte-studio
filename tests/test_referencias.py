@@ -246,11 +246,3 @@ def test_exposicao_e_publico_diferentes_sao_avisados():
     notas = " ".join(R.comparar(refs)["notas"])
     assert "Tempo no ar muito diferente" in notas and "Tamanho de canal muito diferente" in notas
 
-
-def test_metrica_do_usuario_e_rotulada(studio, monkeypatch, enviar, midia):
-    ref = R.nova_ref_arquivo(enviar(midia / "com_audio.mp4"), "meu arquivo")
-    cli = studio.app.test_client()
-    r = cli.put(f"/api/referencias/{ref['id']}", json={"metricas_usuario": {"views": 5000, "publicado_em": "2026-10-01"}})
-    d = R.desempenho(r.get_json())
-    assert d["views"] == 5000 and d["origem_views"] == "informado por você" and d["origem_publicacao"] == "informado por você"
-    assert cli.put(f"/api/referencias/{ref['id']}", json={"metricas_usuario": {"views": "muitas"}}).status_code == 400

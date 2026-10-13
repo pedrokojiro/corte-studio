@@ -21,6 +21,8 @@ class Tarefa:
         self.estado = "na_fila"          # na_fila | rodando | concluida | erro | cancelada
         self.progresso, self.etapa = 0.0, "aguardando"
         self.resultado, self.erro = None, None
+        self.parcial = None              # resultado provisório (ex.: cortes enquanto a fala é transcrita)
+        self.chave = None
         self.criada, self.terminada = time.time(), None
         self._cancelar = threading.Event()
 
@@ -45,7 +47,30 @@ class Tarefa:
     def json(self):
         return {"id": self.id, "tipo": self.tipo, "descricao": self.descricao, "estado": self.estado,
                 "progresso": round(self.progresso, 3), "etapa": self.etapa, "erro": self.erro,
-                "resultado": self.resultado if self.estado == "concluida" else None}
+                "resultado": self.resultado if self.estado == "concluida" else None,
+                "parcial": self.parcial if self.estado in ("na_fila", "rodando") else None}
+
+
+class Faixa:
+    """Uma etapa de uma tarefa maior: o progresso 0..1 da etapa vira ini..ini+peso da tarefa; cancelar vale igual."""
+
+    def __init__(self, tarefa, ini, peso, prefixo=""):
+        self.tarefa, self.ini, self.peso, self.prefixo = tarefa, ini, peso, prefixo
+
+    def avancar(self, progresso=None, etapa=None):
+        self.tarefa.avancar(None if progresso is None else self.ini + self.peso * max(0.0, min(1.0, progresso)),
+                            etapa and self.prefixo + etapa)
+
+    def checar(self):
+        self.tarefa.checar()
+
+    @property
+    def cancelada(self):
+        return self.tarefa.cancelada
+
+    @property
+    def _cancelar(self):
+        return self.tarefa._cancelar
 
 
 _tarefas = {}
@@ -53,12 +78,19 @@ _lock = threading.Lock()
 _pesada = threading.Semaphore(1)
 
 
-def iniciar(tipo, descricao, fn, *args):
+def iniciar(tipo, descricao, fn, *args, chave=None):
+    """`chave`: pedidos idênticos ainda em andamento devolvem a MESMA tarefa (não repete trabalho)."""
     t = Tarefa(tipo, descricao)
+    t.chave = chave
     with _lock:
         agora = time.time()
         for k in [k for k, v in _tarefas.items() if v.terminada and agora - v.terminada > 3600]:
             del _tarefas[k]
+        if chave:
+            igual = next((v for v in _tarefas.values() if v.chave == chave and v.estado in ("na_fila", "rodando")
+                          and not v.cancelada), None)
+            if igual:
+                return igual
         _tarefas[t.id] = t
 
     def rodar():

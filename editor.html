@@ -118,7 +118,49 @@
   .obs{font-size:12.5px;margin:4px 0} .obs b{color:#a9c8ff}
   .quadros{display:flex;gap:6px;overflow:auto;margin-top:6px} .quadros figure{margin:0;font-size:11px;color:var(--mut);text-align:center} .quadros img{height:110px;border-radius:6px;display:block}
 
-  @media(max-width:1000px){main{grid-template-columns:1fr;gap:0;padding:16px}}
+  /* recorte no player: alças de início/fim sobre a trilha da fonte */
+  .trim{margin-top:12px}
+  .trim-trilho{position:relative;height:34px;border-radius:var(--r-sm);background:#0a0c10;border:1px solid var(--line);cursor:pointer;touch-action:none;user-select:none}
+  .trim-sel{position:absolute;top:0;bottom:0;background:rgba(240,120,79,.22);border-top:2px solid var(--acc);border-bottom:2px solid var(--acc)}
+  .trim-seg{position:absolute;top:6px;bottom:6px;background:rgba(155,162,176,.14);border-radius:3px}
+  .trim-alca{position:absolute;top:-4px;bottom:-4px;width:14px;margin-left:-7px;background:var(--acc);border-radius:4px;cursor:ew-resize;box-shadow:0 0 0 2px var(--bg)}
+  .trim-alca::after{content:"";position:absolute;left:6px;top:10px;bottom:10px;width:2px;background:var(--acc-txt);opacity:.6}
+  .trim-alca:focus-visible{outline:2px solid #fff}
+  .trim-cursor{position:absolute;top:-6px;bottom:-6px;width:2px;margin-left:-1px;background:#fff;pointer-events:none}
+  .trim-escala{display:flex;justify-content:space-between;font-size:11px;color:var(--mut);margin-top:3px;font-variant-numeric:tabular-nums}
+  .trim input[type=number]{width:92px}
+  .ativo{border:1px solid var(--line);background:var(--card);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:12.5px;color:var(--mut)}
+  .ativo b{color:var(--txt);font-weight:600}
+  .frase .tempos{grid-column:2 / 4;font-size:11px;color:var(--mut);margin-top:-4px;font-variant-numeric:tabular-nums}
+  .frase.editada input{border-color:rgba(76,195,138,.5)}
+  .chip{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;border:1px solid var(--line2);color:var(--mut)}
+  .chip.ok{border-color:rgba(76,195,138,.5);color:var(--ok)} .chip.warn{border-color:rgba(230,180,80,.5);color:var(--warn)} .chip.bad{border-color:rgba(240,112,112,.5);color:var(--bad)}
+  .sug .campo{margin:3px 0;font-size:12.5px} .sug .campo b{color:var(--mut);font-weight:500}
+  .sug .acoes{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .cita{border-left:2px solid var(--line2);padding-left:8px;color:var(--txt);font-size:12.5px;margin:4px 0}
+  .efs td input[type=number]{width:70px}
+  /* player: vistas Original / Editado (aproximado) / Renderizado */
+  .vistas{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .seg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r-sm);overflow:hidden}
+  .seg button{border:0;border-radius:0;background:var(--bg);padding:6px 12px}
+  .seg button+button{border-left:1px solid var(--line2)}
+  .seg button.on{background:var(--acc);color:var(--acc-txt);font-weight:600}
+  .seg small{font-weight:400;opacity:.75;font-size:11px}
+  .stage video#vidR{margin:0 auto;max-height:62vh;width:auto;max-width:100%}
+  .stage.editado .crop{box-shadow:0 0 0 9999px rgba(0,0,0,.82);border-color:transparent}
+  .camada{position:absolute;pointer-events:none;overflow:hidden}
+  .camada .ov{position:absolute;left:4%;right:4%;text-align:center;transform:translateY(-50%);line-height:1.15;white-space:normal;word-wrap:break-word}
+  .camada .ov span{paint-order:stroke fill}
+  .camada .caixa{display:inline;padding:.08em .3em;box-decoration-break:clone;-webkit-box-decoration-break:clone;border-radius:.12em}
+  #prevStatus:empty{display:none}
+  .corte .rank{font-size:12px;font-weight:700;color:var(--acc-txt);background:var(--acc);border-radius:6px;padding:1px 7px}
+  .corte .titulo-corte{font-size:15px;line-height:1.35}
+  .corte .ideia{margin:6px 0;color:var(--txt)}
+  .corte input[type=number]{width:76px}
+  .mini-v{width:84px;aspect-ratio:9/16;object-fit:cover;border-radius:6px;background:#1e2128;margin-right:12px;flex:none}
+  textarea{font:inherit;resize:vertical}
+  main>section,main>aside{min-width:0}
+  @media(max-width:1000px){main{grid-template-columns:minmax(0,1fr);gap:0;padding:16px}}
   @media(max-width:600px){.topo-in,.faixa-msg{padding-left:16px;padding-right:16px}.card{padding:16px;margin-bottom:16px}.cmp{grid-template-columns:1fr}#pNome{width:100%}.grupo{width:100%}.sp{display:none}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -148,55 +190,125 @@
 </header>
 <div id="msg" class="faixa-msg" aria-live="polite"></div>
 <main id="conteudo">
-<section aria-label="Fontes e linha do tempo">
+<section aria-label="Player e linha do tempo">
   <div class="card">
-    <h2>Fontes e player</h2>
-    <div class="row">
-      <input type="file" id="arqFonte" accept="video/*,.mkv" aria-label="Adicionar vídeo-fonte">
-      <select id="fonteVis" aria-label="Fonte no player"></select>
-      <span id="infoFonte" class="mut"></span>
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Player</h2>
+      <div class="row">
+        <input type="file" id="arqFonte" accept="video/*,.mkv" aria-label="Adicionar vídeo-fonte">
+        <select id="fonteVis" aria-label="Fonte no player"></select>
+        <span id="infoFonte" class="mut"></span>
+      </div>
     </div>
-    <div class="stage"><video id="vid" controls playsinline></video><div class="crop" id="crop" hidden></div></div>
-    <div class="row esp">
-      <span class="mut">Cursor na fonte: <b id="cursor">0:00.0</b></span>
-      <button id="bIni" title="I">Marcar início</button><button id="bFim" title="O">Marcar fim</button>
-      <span class="mut" id="marcas"></span>
+    <div class="vistas esp" role="group" aria-label="O que o player mostra">
+      <div class="seg" role="radiogroup" aria-label="Vista">
+        <button role="radio" data-vista="original" aria-checked="true" class="on" title="O vídeo-fonte, sem nenhuma edição">Original</button>
+        <button role="radio" data-vista="editado" aria-checked="false" title="A linha do tempo com legenda, texto na tela, volume, música e efeitos desenhados/mixados no navegador (aproximado)">Editado <small>aproximado</small></button>
+        <button role="radio" data-vista="render" aria-checked="false" title="Trecho curto renderizado pelo mesmo motor da exportação">Renderizado <small>trecho</small></button>
+      </div>
+      <button id="bAB" class="mini" title="Alterna Original ↔ Editado no mesmo instante (tecla B)">Antes/depois</button>
+      <span id="prevStatus" class="chip" aria-live="polite"></span>
     </div>
-    <div class="row esp">
-      <button id="bAddSeg" class="pri" title="Enter">Adicionar segmento</button>
-      <button id="bDividir" title="S">✂ Dividir no cursor</button>
+    <div class="stage" id="stage">
+      <video id="vid" controls playsinline></video>
+      <video id="vidR" controls playsinline hidden></video>
+      <div class="crop" id="crop" hidden></div>
+      <div class="camada" id="camada" hidden aria-hidden="true"><div id="ovTits"></div><div id="ovLeg"></div></div>
     </div>
-    <div class="mut dica">Atalhos: <kbd>I</kbd>/<kbd>O</kbd> marcam, <kbd>Enter</kbd> adiciona, <kbd>S</kbd> divide o segmento selecionado no cursor, <kbd>Del</kbd> remove, <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd>, <kbd>Ctrl+S</kbd> salva. A mídia de origem nunca é alterada.</div>
+    <div id="vistaInfo" class="mut dica"></div>
+    <div class="row esp" id="rendCtl" hidden>
+      <button id="bRendTrecho" class="mini">Renderizar este trecho</button>
+      <label class="chk" style="margin:0;font-size:12.5px"><input type="checkbox" id="rendAuto" checked> atualizar sozinho ao editar</label>
+      <span id="rendAlt"></span>
+    </div>
+    <div id="rendProg"></div>
+    <div class="trim" id="trim" hidden>
+      <div class="row" style="justify-content:space-between"><span class="mut" id="trimRot"></span>
+        <label class="chk" style="margin:0;font-size:12.5px"><input type="checkbox" id="trimZoom"> aproximar no corte</label></div>
+      <div class="trim-trilho" id="trimTrilho" aria-label="Recorte do corte ativo: arraste as alças">
+        <div class="trim-sel" id="trimSel"></div>
+        <div class="trim-alca" id="trimA" role="slider" tabindex="0" aria-label="Início do corte ativo (setas: 1 quadro; Shift: 1 s)"></div>
+        <div class="trim-alca" id="trimB" role="slider" tabindex="0" aria-label="Fim do corte ativo (setas: 1 quadro; Shift: 1 s)"></div>
+        <div class="trim-cursor" id="trimCur"></div>
+      </div>
+      <div class="trim-escala"><span id="trimV0"></span><span id="trimV1"></span></div>
+      <div class="row esp">
+        <label for="trimIni" class="mut inline">Início</label><input type="number" id="trimIni" step="0.033" min="0">
+        <button class="mini" id="trimIniCur" title="Atalho: [">⇤ no cursor</button>
+        <label for="trimFim" class="mut inline">Fim</label><input type="number" id="trimFim" step="0.033" min="0">
+        <button class="mini" id="trimFimCur" title="Atalho: ]">no cursor ⇥</button>
+        <span class="mut">Duração <b id="trimDur">–</b></span>
+      </div>
+      <div class="row esp">
+        <button id="trimPlay" title="Atalho: P">▶ Tocar só o corte</button>
+        <label class="chk" style="margin:0"><input type="checkbox" id="trimLoop"> repetir</label>
+        <button id="bDividir" title="S">✂ Dividir no cursor</button>
+        <span class="mut">O vídeo original não é alterado: só o plano muda (Ctrl+Z desfaz).</span>
+      </div>
+    </div>
+    <details class="ajuste" style="margin-top:14px"><summary>Novo corte por marcação (I/O) e atalhos</summary>
+      <div class="row esp">
+        <span class="mut">Cursor na fonte: <b id="cursor">0:00.0</b></span>
+        <button id="bIni" title="I">Marcar início</button><button id="bFim" title="O">Marcar fim</button>
+        <span class="mut" id="marcas"></span>
+        <button id="bAddSeg" class="pri" title="Enter">Adicionar segmento</button>
+      </div>
+      <div class="mut dica">Atalhos: <kbd>I</kbd>/<kbd>O</kbd> marcam, <kbd>Enter</kbd> adiciona, <kbd>S</kbd> divide o corte ativo no cursor, <kbd>Del</kbd> remove, <kbd>[</kbd>/<kbd>]</kbd> recortam o corte ativo no cursor, <kbd>P</kbd> toca só o corte, <kbd>B</kbd> antes/depois, <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd>, <kbd>Ctrl+S</kbd> salva. A mídia de origem nunca é alterada.</div>
+    </details>
   </div>
   <div class="card">
     <h2>Linha do tempo <span class="mut" style="font-weight:400">(ordem de saída)</span></h2>
     <div class="tl" id="tl" role="list" aria-label="Segmentos na ordem de saída"></div>
     <div id="tlInfo" class="mut dica"></div>
     <div class="tabela esp"><table><thead><tr><th>#</th><th>Saída</th><th>Início (fonte)</th><th>Fim (fonte)</th><th>Dur.</th><th></th></tr></thead><tbody id="segs"></tbody></table></div>
-    <h2 class="sub">Sugerir cortes</h2>
-    <div class="row">
-      <label for="sMin" class="mut inline">Cenas e pausas entre</label>
-      <input type="number" id="sMin" value="15" min="1" aria-label="mínimo"> e <input type="number" id="sMax" value="60" min="1" aria-label="máximo"> s
-      <button id="bSug">Sugerir</button>
-    </div>
-    <div id="sugCortes" class="esp" aria-live="polite"></div>
   </div>
 </section>
 
-<aside aria-label="Legenda, títulos, efeitos, ganchos, referências e exportação">
+<aside aria-label="Cortes, legendas, texto na tela, áudio e efeitos, publicação">
+  <div class="ativo" id="corteAtivo" aria-live="polite"></div>
+  <details class="ajuste" style="margin:-4px 0 12px"><summary>Análise de conteúdo: <span id="provResumo"></span></summary>
+    <div class="row">
+      <label for="provedor" class="mut inline">Usar</label>
+      <select id="provedor"><option value="auto">IA quando configurada (Gemini)</option><option value="local">Só heurística local (sem IA)</option></select>
+      <span id="provInfo" class="mut"></span>
+    </div>
+    <label class="chk" style="font-size:12.5px"><input type="checkbox" id="envioQuadros"> Autorizo enviar QUADROS (imagens) do corte ao Google para análise visual</label>
+  </details>
   <div class="tabs" role="tablist">
-    <button data-tab="tLeg" class="on">Legenda</button>
-    <button data-tab="tTit">Títulos</button>
-    <button data-tab="tEf">Efeitos e áudio</button>
-    <button data-tab="tGan">Ganchos</button>
-    <button data-tab="tRef">Referências</button>
+    <button data-tab="tCortes" class="on">Cortes</button>
+    <button data-tab="tLeg">Legendas</button>
+    <button data-tab="tTit">Texto na tela</button>
+    <button data-tab="tEf">Áudio e efeitos</button>
+    <button data-tab="tPub">Publicação</button>
   </div>
 
-  <div class="card tab on" id="tLeg">
-    <h2>Legenda <span class="mut" style="font-weight:400">(fala transcrita)</span></h2>
-    <div class="mut intro">A legenda é a fala de verdade do vídeo. Texto editorial vai em <b>Títulos</b>, com outro visual.</div>
+  <div class="card tab on" id="tCortes">
+    <h2>Descobrir cortes pelo conteúdo <span class="mut" style="font-weight:400">(fonte inteira, só quando você pedir)</span></h2>
+    <div class="mut intro">Lê a fala da fonte inteira, acha os assuntos completos e os ordena por potencial editorial (não é previsão de views). Pausas e trocas de cena só ajustam as bordas. Enquanto transcreve, mostra sugestões provisórias. Não cria legenda; a legenda dos cortes reaproveita esta transcrição.</div>
+    <div class="row">
+      <label for="sMin" class="mut inline">Duração entre</label>
+      <input type="number" id="sMin" value="20" min="5" aria-label="duração mínima"> e <input type="number" id="sMax" value="75" min="6" aria-label="duração máxima"> s
+      <button id="bSug" class="pri">Descobrir cortes</button>
+    </div>
+    <div id="sugProg"></div>
+    <div id="sugCortes" class="esp" aria-live="polite"></div>
+    <h2 class="sub">Gancho de abertura</h2>
+    <div class="mut intro">Analisa a fala do escopo escolhido (transcreve só ele, se precisar): afirmações, perguntas, conflitos, revelações e, com quadros autorizados, momentos visuais. Separa fala existente, texto novo na tela e narração nova, e diz se o corte entrega o que o gancho promete.</div>
+    <div class="row esp">
+      <label for="ganEscopo" class="mut inline">Escopo</label>
+      <select id="ganEscopo"><option value="corte">Corte ativo</option><option value="linha">Edição completa (todos os cortes)</option></select>
+      <button id="bGanchos" class="pri">Analisar ganchos</button><span id="ganInfo" class="mut" aria-live="polite"></span></div>
+    <div id="ganProg"></div>
+    <div id="ganchos"></div>
+  </div>
+
+  <div class="card tab" id="tLeg">
+    <h2>Legendas <span class="mut" style="font-weight:400">(fala transcrita, queimada no vídeo)</span></h2>
+    <div class="mut intro">A legenda é a fala de verdade do vídeo. Texto editorial vai em <b>Texto na tela</b>, com outro visual; o texto do post vai em <b>Publicação</b>.</div>
     <label class="chk"><input type="checkbox" id="legAtiva"> Legenda ativa</label>
     <div id="transBox"></div>
+    <div id="transProg"></div>
+    <div id="avisosLeg"></div>
     <label>Estilo (miniaturas geradas pelo mesmo motor da exportação)</label>
     <div class="presets" id="presets"></div>
     <details class="ajuste"><summary>Ajustar estilo</summary>
@@ -222,66 +334,79 @@
       </div>
       <datalist id="fontesComuns"><option>Arial</option><option>Segoe UI</option><option>Impact</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Bahnschrift</option></datalist>
     </details>
-    <label>Frases que aparecem no vídeo (na ordem de saída) — edite o texto; use <kbd>|</kbd> para dividir</label>
-    <div class="frases" id="frases"></div>
+    <div class="row" style="justify-content:space-between;margin-top:12px">
+      <label style="margin:0">Frases que aparecem no vídeo (na ordem de saída) — edite o texto; use <kbd>|</kbd> para dividir</label>
+      <label class="chk" style="margin:0;font-size:12.5px"><input type="checkbox" id="soAtivo"> só do corte ativo</label>
+    </div>
+    <div class="frases esp" id="frases"></div>
   </div>
 
   <div class="card tab" id="tTit">
-    <h2>Títulos editoriais</h2>
-    <div class="legal">Títulos são texto do editor, não fala. Aparecem numa caixa clara no alto, separados da legenda, e nunca são atribuídos a quem fala no vídeo.</div>
+    <h2>Texto na tela <span class="mut" style="font-weight:400">(queimado no vídeo)</span></h2>
+    <div class="legal">Texto do editor, não fala: tem conteúdo, tempo, posição e aparência próprios, separado da legenda, e nunca é atribuído a quem fala. O texto do post do TikTok fica em <b>Publicação</b>.</div>
     <div id="titulos"></div>
-    <button id="bAddTit" class="esp">Adicionar título</button>
+    <div class="row esp"><button id="bAddTit">Adicionar texto na tela</button>
+      <button id="bSugTit" class="pri">✨ Sugerir textos para o corte ativo</button></div>
+    <div id="titProg"></div>
+    <div id="titSug" aria-live="polite"></div>
   </div>
 
   <div class="card tab" id="tEf">
-    <h2>Efeitos <span class="mut" style="font-weight:400">(cada um independente)</span></h2>
-    <label for="cropX">Enquadramento 9:16 — posição horizontal</label><input type="range" id="cropX" min="0" max="1" step="0.01">
-    <label class="chk"><input type="checkbox" id="zAtivo"> Zoom lento por segmento (alterna aproximar/afastar)</label>
-    <label for="zInt">Intensidade do zoom: <span id="zV"></span></label><input type="range" id="zInt" min="0.02" max="0.15" step="0.01">
-    <div class="row esp"><label for="trTipo" class="inline">Transição</label>
-      <select id="trTipo"><option value="corte">Corte seco</option><option value="fade">Fade pelo preto (não muda a duração)</option></select>
-      <input type="number" id="trDur" min="0.05" max="0.5" step="0.05" aria-label="Duração da transição"> s</div>
-    <h2 class="sub">Áudio</h2>
+    <h2>Áudio <span class="mut" style="font-weight:400">(ouça no player, vista Editado)</span></h2>
     <label for="vo">Volume do áudio original: <span id="voV"></span></label><input type="range" id="vo" min="0" max="2" step="0.05">
-    <label class="chk"><input type="checkbox" id="norm"> Normalizar volume (−14 LUFS, padrão comum em vídeo curto)</label>
-    <label for="arqMus">Música (opcional, livre de direitos)</label>
+    <label class="chk"><input type="checkbox" id="realce"> Realce de voz (corta grave, reduz ruído de fundo, comprime de leve) <span class="mut">· só no renderizado</span></label>
+    <label class="chk"><input type="checkbox" id="norm"> Normalizar volume (−14 LUFS) <span class="mut">· só no renderizado</span></label>
+    <label for="arqMus">Música (opcional, que você tenha direito de usar)</label>
     <div class="row"><input type="file" id="arqMus" accept="audio/*"><span id="musInfo" class="mut"></span><button id="bSemMus" class="mini">remover</button></div>
     <label for="vm">Volume da música: <span id="vmV"></span></label><input type="range" id="vm" min="0" max="1" step="0.01">
-    <label class="chk"><input type="checkbox" id="duck"> Abaixar a música quando alguém fala</label>
-  </div>
-
-  <div class="card tab" id="tGan">
-    <h2>Ganchos de abertura</h2>
-    <div class="mut intro">Sugestões tiradas da fala de verdade (com tempo na fonte) e títulos derivados dela, separados. Nenhuma fala é inventada ou atribuída a quem fala.</div>
-    <div class="row esp"><button id="bGanchos" class="pri">Sugerir ganchos</button><span id="ganInfo" class="mut" aria-live="polite"></span></div>
-    <div id="ganchos"></div>
-  </div>
-
-  <div class="card tab" id="tRef">
-    <h2>Vídeos de referência</h2>
-    <div id="refCfg" class="mut intro"></div>
+    <label class="chk"><input type="checkbox" id="duck"> Abaixar a música quando alguém fala <span class="mut">· só no renderizado</span></label>
+    <h2 class="sub">Efeitos sonoros</h2>
+    <div class="mut intro">Sons sintetizados pelo próprio app (sem licença a conferir) ou arquivos seus. Efeito preso à fonte acompanha o trecho quando você corta ou reordena.</div>
+    <div id="efsLista"></div>
     <div class="row esp">
-      <input type="url" id="refUrl" placeholder="URL do YouTube ou TikTok" style="flex:1;min-width:200px" aria-label="URL de referência">
-      <button id="bRefUrl">Adicionar URL</button>
+      <select id="efSom" aria-label="Som"></select>
+      <button id="efOuvir" class="mini" title="Só o som, isolado">▶ ouvir o som</button>
+      <button id="efAdd">Adicionar no cursor do player</button>
     </div>
-    <div class="row esp"><label for="refArq" class="mut inline">ou arquivo de referência:</label><input type="file" id="refArq" accept="video/*,.mkv"></div>
-    <div id="refs"></div>
-    <h2 class="sub">Comparação e recomendações</h2>
-    <button id="bComparar">Comparar com o meu vídeo</button>
-    <div id="comparacao"></div>
+    <h2 class="sub">Sugestões de áudio</h2>
+    <div class="row">
+      <label for="audEscopo" class="mut inline">Escopo</label>
+      <select id="audEscopo"><option value="corte">Corte ativo</option><option value="linha">Edição completa (todos os cortes)</option></select>
+      <button id="bSugAud" class="pri">Sugerir áudio</button></div>
+    <div class="mut dica">Prioridade: entender a fala. Só sugere efeito com propósito, em pausas que já existem.</div>
+    <div id="audProg"></div>
+    <div id="audSug" aria-live="polite"></div>
+    <audio id="audPrev" hidden></audio>
+    <details class="ajuste" style="margin-top:16px"><summary>Imagem: enquadramento, zoom e transição</summary>
+      <label for="cropX">Enquadramento 9:16 — posição horizontal</label><input type="range" id="cropX" min="0" max="1" step="0.01">
+      <label class="chk"><input type="checkbox" id="zAtivo"> Zoom lento por segmento (alterna aproximar/afastar) <span class="mut">· só no renderizado</span></label>
+      <label for="zInt">Intensidade do zoom: <span id="zV"></span></label><input type="range" id="zInt" min="0.02" max="0.15" step="0.01">
+      <div class="row esp"><label for="trTipo" class="inline">Transição</label>
+        <select id="trTipo"><option value="corte">Corte seco</option><option value="fade">Fade pelo preto (não muda a duração)</option></select>
+        <input type="number" id="trDur" min="0.05" max="0.5" step="0.05" aria-label="Duração da transição"> s</div>
+    </details>
   </div>
 
-  <div class="card">
-    <h2>Prévia e exportação</h2>
+  <div class="card tab" id="tPub">
+    <h2>Texto da publicação <span class="mut" style="font-weight:400">(legenda do post no TikTok; não aparece no vídeo)</span></h2>
+    <textarea id="pubTexto" rows="4" style="width:100%" maxlength="4000" aria-label="Texto da publicação" placeholder="Escreva aqui ou peça sugestões. Fica salvo no projeto."></textarea>
+    <div class="row esp"><button id="pubCopiar">Copiar</button><span id="pubConta" class="mut"></span>
+      <button id="bSugPub" class="pri">✨ Sugerir texto da publicação</button></div>
+    <div id="pubProg"></div>
+    <div id="pubSug" aria-live="polite"></div>
+    <div class="mut dica">O app não publica nada: copie o texto e cole no TikTok.</div>
+
+    <h2 class="sub">Prévia completa e exportação</h2>
     <div class="row">
-      <button id="bPrevia" class="pri">Gerar prévia</button>
-      <button id="bExportar">Exportar 1080×1920</button>
+      <button id="bPrevia">Prévia completa (540×960)</button>
+      <button id="bExportar" class="pri">Exportar 1080×1920</button>
       <button id="bComparaVers" title="Prévia lado a lado de duas versões">Comparar versões</button>
     </div>
     <div id="tarefa" class="esp"></div>
     <div id="previaBox"></div>
-    <div class="mut dica">A prévia é renderizada a partir do mesmo plano da exportação, só em resolução menor.</div>
+    <div class="mut dica">Prévia e exportação usam o mesmo plano validado; a prévia só tem resolução menor.</div>
     <div class="legal">Depois de baixar: ative o toggle "conteúdo gerado por IA" no TikTok quando houver voz ou imagem sintética. Abaixo de 61s não conta para o Creator Rewards.</div>
+
   </div>
 </aside>
 </main>
