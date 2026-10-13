@@ -5,80 +5,150 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Corte Studio · Editor</title>
 <style>
-  :root{--bg:#10131a;--card:#181d27;--line:#2a3140;--txt:#e7eaf0;--mut:#8a93a6;--acc:#e0603f;--ok:#3fb27f;--warn:#e0b13f;--bad:#e05a5a;--sel:#3a74e0}
+  /* Paleta escura discreta, um único acento (--acc). ok/warn/bad e as tags são só para estado e origem. */
+  :root{
+    --bg:#0e1014;--card:#15181e;--card2:#1b1f27;--line:#262b35;--line2:#363c48;
+    --txt:#e9ebf0;--mut:#9ba2b0;--acc:#f0784f;--acc-txt:#1b0e08;
+    --ok:#4cc38a;--warn:#e6b450;--bad:#f07070;--sel:#3a74e0;
+    --r:12px;--r-sm:8px;
+    color-scheme:dark;
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif}
-  header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
-  header h1{font-size:16px;margin:0 8px 0 0}
-  header input{width:200px}
+  [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:var(--acc)}
+  :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .pular{position:absolute;left:-9999px;top:8px;z-index:10;background:var(--card2);color:var(--txt);padding:8px 12px;border-radius:var(--r-sm)}
+  .pular:focus{left:16px}
+
+  .topo{position:sticky;top:0;z-index:5;background:rgba(14,16,20,.94);border-bottom:1px solid var(--line);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  .topo-in{max-width:1500px;margin:0 auto;padding:12px 24px;display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap}
+  .topo h1{font-size:16px;font-weight:650;margin:0;letter-spacing:-.01em;white-space:nowrap}
+  .topo h1 span{color:var(--mut);font-weight:400}
+  .grupo{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #pNome{width:200px}
+  #estadoSalvo{font-size:12.5px}
   .sp{flex:1}
-  main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(360px,1fr);gap:14px;padding:14px 16px;max-width:1500px;margin:0 auto}
-  @media(max-width:1000px){main{grid-template-columns:1fr}}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
-  .card h2{font-size:12px;margin:0 0 8px;color:var(--acc);text-transform:uppercase;letter-spacing:.05em}
-  label{display:block;color:var(--mut);font-size:12px;margin:6px 0 2px}
-  input[type=text],input[type=number],input[type=url],select,textarea{background:#0e1118;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+  .link-simples{font-size:13px;color:var(--mut);text-decoration:none;border-bottom:1px solid var(--line2)}
+  .link-simples:hover{color:var(--txt)}
+  .faixa-msg{max-width:1500px;margin:0 auto;padding:0 24px}
+
+  main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(360px,1fr);gap:24px;padding:20px 24px 32px;max-width:1500px;margin:0 auto;align-items:start}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:20px}
+  .card h2{font-size:15px;font-weight:600;margin:0 0 14px;color:var(--txt)}
+  .card h2.sub{font-size:13px;margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
+  .intro{margin-bottom:6px}
+
+  label{display:block;color:var(--mut);font-size:12.5px;margin:12px 0 6px}
+  label.chk{display:flex;gap:8px;align-items:center;color:var(--txt);font-size:14px;margin:12px 0;cursor:pointer}
+  label.inline{margin:0}
+  input[type=text],input[type=number],input[type=url],input[type=date],select,textarea{background:var(--bg);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:7px 10px;font:inherit;transition:border-color .15s}
+  input[type=text]:hover,input[type=number]:hover,input[type=url]:hover,select:hover,textarea:hover{border-color:#4a5162}
+  input[type=text]:focus,input[type=number]:focus,input[type=url]:focus,input[type=date]:focus,select:focus,textarea:focus{border-color:var(--acc)}
   input[type=number]{width:84px}
-  input[type=range]{width:100%}
-  button{background:#232a38;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
-  button:hover{border-color:var(--acc)} button:disabled{opacity:.45;cursor:not-allowed}
-  button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
-  button.mini{padding:2px 7px;font-size:12px}
+  input[type=range]{width:100%;accent-color:var(--acc);margin:4px 0}
+  input[type=checkbox]{accent-color:var(--acc);width:16px;height:16px;margin:0}
+  input[type=color]{width:40px;height:34px;padding:3px;background:var(--bg);border:1px solid var(--line2);border-radius:var(--r-sm);cursor:pointer}
+  input[type=file]{max-width:100%;color:var(--mut);font:inherit;font-size:13px}
+  input[type=file]::file-selector-button{background:var(--card2);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:7px 14px;margin-right:12px;font:inherit;cursor:pointer}
+  input[type=file]::file-selector-button:hover{border-color:#4a5162}
+  .w140{width:140px}
+
+  button{background:var(--card2);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:7px 14px;font:inherit;cursor:pointer;transition:background .15s,border-color .15s}
+  button:hover{background:#232835;border-color:#4a5162}
+  button:disabled,button:disabled:hover{opacity:.45;cursor:not-allowed;background:var(--card2);border-color:var(--line2)}
+  button.pri{background:var(--acc);border-color:var(--acc);color:var(--acc-txt);font-weight:600}
+  button.pri:hover{background:#f48a66;border-color:#f48a66}
+  button.pri:disabled,button.pri:disabled:hover{background:var(--acc);border-color:var(--acc)}
+  button.mini{padding:3px 9px;font-size:12px;border-radius:6px}
+
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .mut{color:var(--mut);font-size:12px} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
-  .stage{position:relative;background:#000;border-radius:8px;overflow:hidden}
+  .esp{margin-top:12px} .dica{margin-top:10px}
+  .mut{color:var(--mut);font-size:12.5px} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+
+  .stage{position:relative;background:#000;border-radius:10px;overflow:hidden;margin-top:14px}
   .stage video{display:block;width:100%;max-height:52vh}
   .crop{position:absolute;top:0;bottom:0;border:2px solid var(--acc);pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.5)}
-  .tl{display:flex;height:34px;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-top:8px;background:#0b0e14}
-  .tl div{border-right:1px solid #0b0e14;cursor:pointer;font-size:11px;color:#fff;padding:2px 4px;overflow:hidden;white-space:nowrap}
+  #cursor{font-variant-numeric:tabular-nums;color:var(--txt)}
+
+  .tl{display:flex;height:40px;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;background:#0a0c10}
+  .tl div{border-right:1px solid #0a0c10;cursor:pointer;font-size:11px;font-weight:600;color:#fff;padding:4px 6px;overflow:hidden;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.6)}
   .tl div.sel{outline:2px solid #fff;outline-offset:-2px}
-  table{width:100%;border-collapse:collapse}
-  td,th{padding:4px 3px;border-bottom:1px solid var(--line);text-align:left;font-size:12.5px;vertical-align:middle}
-  tr.sel td{background:#1c2638}
-  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
-  .tabs button{border-radius:6px 6px 0 0} .tabs button.on{background:var(--acc);border-color:var(--acc)}
+
+  .tabela,#comparacao{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th{font-weight:500;color:var(--mut);font-size:12px}
+  td,th{padding:7px 5px;border-bottom:1px solid var(--line);text-align:left;font-size:12.5px;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:0}
+  tr.sel td{background:rgba(240,120,79,.08)}
+
+  .tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:16px}
+  .tabs button{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;margin-bottom:-1px;padding:10px 12px;color:var(--mut)}
+  .tabs button:hover{background:none;color:var(--txt)}
+  .tabs button.on{color:var(--txt);border-bottom-color:var(--acc);font-weight:600}
   .tab{display:none} .tab.on{display:block}
-  .presets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-  .preset{border:2px solid var(--line);border-radius:8px;padding:4px;cursor:pointer;text-align:center;font-size:12px;background:#0e1118}
-  .preset img{width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:4px;background:#222;display:block}
+
+  .presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:10px}
+  .preset{border:2px solid var(--line);border-radius:10px;padding:5px;cursor:pointer;text-align:center;font-size:12px;background:var(--bg);transition:border-color .15s}
+  .preset:hover{border-color:var(--line2)}
+  .preset img{width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:6px;background:#1e2128;display:block;margin-bottom:4px}
   .preset.on{border-color:var(--acc)}
-  .frases{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:6px}
-  .frase{display:grid;grid-template-columns:62px 1fr auto;gap:6px;align-items:center;padding:4px 6px;border-bottom:1px solid var(--line)}
+  details{margin-top:14px}
+  summary{cursor:pointer;color:var(--mut);padding:4px 0}
+  summary:hover{color:var(--txt)}
+  .ajuste{border:1px solid var(--line);border-radius:var(--r-sm);padding:4px 14px 14px}
+  .ajuste[open] summary{color:var(--txt);margin-bottom:4px}
+
+  .frases{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
+  .frase{display:grid;grid-template-columns:66px 1fr auto;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .frase:last-child{border-bottom:0}
   .frase input{width:100%}
-  .tag{display:inline-block;padding:1px 6px;border-radius:99px;font-size:11px;background:#2a3140;color:var(--mut)}
-  .tag.ia{background:#3b2a52;color:#d8c2ff} .tag.loc{background:#24392f;color:#9fe0bf} .tag.fala{background:#22344f;color:#a9c8ff}
-  .barra{height:8px;background:#0b0e14;border-radius:99px;overflow:hidden;margin:4px 0}
+
+  .tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;background:#262b35;color:var(--mut)}
+  .tag.ia{background:#33284a;color:#d8c2ff} .tag.loc{background:#20342b;color:#9fe0bf} .tag.fala{background:#1f3049;color:#a9c8ff}
+  .barra{height:6px;background:#0a0c10;border-radius:99px;overflow:hidden;margin:6px 0}
   .barra i{display:block;height:100%;background:var(--acc);width:0;transition:width .3s}
-  .sug{border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0;background:#141924}
+  .sug{border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0;background:var(--card2)}
   .sug.aplicada{border-color:var(--ok)} .sug.rejeitada{opacity:.5}
-  .legal{border-left:3px solid var(--warn);padding:6px 9px;background:#1d1a12;border-radius:4px;font-size:12px;color:#d9c48a;margin:6px 0}
-  #previaBox video{width:100%;max-height:60vh;background:#000;border-radius:8px}
-  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .cmp video{width:100%;background:#000;border-radius:6px}
-  kbd{background:#232a38;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
-  .obs{font-size:12.5px;margin:3px 0} .obs b{color:#a9c8ff}
-  .quadros{display:flex;gap:4px;overflow:auto} .quadros figure{margin:0;font-size:11px;color:var(--mut);text-align:center} .quadros img{height:110px;border-radius:4px;display:block}
+  .legal{border:1px solid rgba(230,180,80,.28);background:rgba(230,180,80,.06);color:#ecd59b;border-radius:var(--r-sm);padding:10px 12px;font-size:12.5px;margin:12px 0}
+  #previaBox video{width:100%;max-height:60vh;background:#000;border-radius:10px}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .cmp video{width:100%;background:#000;border-radius:8px}
+  kbd{background:var(--card2);border:1px solid var(--line2);border-radius:4px;padding:0 5px;font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--txt)}
+  .obs{font-size:12.5px;margin:4px 0} .obs b{color:#a9c8ff}
+  .quadros{display:flex;gap:6px;overflow:auto;margin-top:6px} .quadros figure{margin:0;font-size:11px;color:var(--mut);text-align:center} .quadros img{height:110px;border-radius:6px;display:block}
+
+  @media(max-width:1000px){main{grid-template-columns:1fr;gap:0;padding:16px}}
+  @media(max-width:600px){.topo-in,.faixa-msg{padding-left:16px;padding-right:16px}.card{padding:16px;margin-bottom:16px}.cmp{grid-template-columns:1fr}#pNome{width:100%}.grupo{width:100%}.sp{display:none}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
-<header>
-  <h1>Corte Studio · Editor</h1>
-  <input type="text" id="pNome" placeholder="Nome do projeto" aria-label="Nome do projeto">
-  <button id="bNovo">Novo</button>
-  <select id="pLista" aria-label="Abrir projeto"><option value="">Abrir projeto…</option></select>
-  <button id="bSalvar" class="pri">Salvar</button>
-  <span id="estadoSalvo" class="mut"></span>
-  <span class="sp"></span>
-  <button id="bDesfazer" title="Ctrl+Z">↶ Desfazer</button>
-  <button id="bRefazer" title="Ctrl+Y">↷ Refazer</button>
-  <label class="mut" style="margin:0">Versão</label>
-  <select id="versao" aria-label="Versão do plano"></select>
-  <button id="bDuplicar" title="Copia a versão atual como alternativa">Duplicar versão</button>
-  <a href="/" class="mut" style="margin-left:6px">modo simples</a>
+<a class="pular" href="#conteudo">Pular para o conteúdo</a>
+<header class="topo">
+  <div class="topo-in">
+    <h1>Corte Studio <span>· Editor</span></h1>
+    <div class="grupo" role="group" aria-label="Projeto">
+      <input type="text" id="pNome" placeholder="Nome do projeto" aria-label="Nome do projeto">
+      <button id="bNovo">Novo</button>
+      <select id="pLista" aria-label="Abrir projeto"><option value="">Abrir projeto…</option></select>
+      <button id="bSalvar" class="pri">Salvar</button>
+      <span id="estadoSalvo" class="mut" aria-live="polite"></span>
+    </div>
+    <span class="sp"></span>
+    <div class="grupo" role="group" aria-label="Histórico e versões">
+      <button id="bDesfazer" title="Ctrl+Z">↶ Desfazer</button>
+      <button id="bRefazer" title="Ctrl+Y">↷ Refazer</button>
+      <label for="versao" class="mut inline">Versão</label>
+      <select id="versao" aria-label="Versão do plano"></select>
+      <button id="bDuplicar" title="Copia a versão atual como alternativa">Duplicar versão</button>
+    </div>
+    <a href="/" class="link-simples">Modo simples</a>
+  </div>
 </header>
-<div id="msg" style="padding:0 16px" aria-live="polite"></div>
-<main>
-<section>
+<div id="msg" class="faixa-msg" aria-live="polite"></div>
+<main id="conteudo">
+<section aria-label="Fontes e linha do tempo">
   <div class="card">
     <h2>Fontes e player</h2>
     <div class="row">
@@ -86,31 +156,34 @@
       <select id="fonteVis" aria-label="Fonte no player"></select>
       <span id="infoFonte" class="mut"></span>
     </div>
-    <div class="stage" style="margin-top:8px"><video id="vid" controls playsinline></video><div class="crop" id="crop" hidden></div></div>
-    <div class="row" style="margin-top:6px">
+    <div class="stage"><video id="vid" controls playsinline></video><div class="crop" id="crop" hidden></div></div>
+    <div class="row esp">
       <span class="mut">Cursor na fonte: <b id="cursor">0:00.0</b></span>
       <button id="bIni" title="I">Marcar início</button><button id="bFim" title="O">Marcar fim</button>
       <span class="mut" id="marcas"></span>
+    </div>
+    <div class="row esp">
       <button id="bAddSeg" class="pri" title="Enter">Adicionar segmento</button>
       <button id="bDividir" title="S">✂ Dividir no cursor</button>
     </div>
-    <div class="mut" style="margin-top:4px">Atalhos: <kbd>I</kbd>/<kbd>O</kbd> marcam, <kbd>Enter</kbd> adiciona, <kbd>S</kbd> divide o segmento selecionado no cursor, <kbd>Del</kbd> remove, <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd>, <kbd>Ctrl+S</kbd> salva. A mídia de origem nunca é alterada.</div>
+    <div class="mut dica">Atalhos: <kbd>I</kbd>/<kbd>O</kbd> marcam, <kbd>Enter</kbd> adiciona, <kbd>S</kbd> divide o segmento selecionado no cursor, <kbd>Del</kbd> remove, <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd>, <kbd>Ctrl+S</kbd> salva. A mídia de origem nunca é alterada.</div>
   </div>
   <div class="card">
-    <h2>Linha do tempo (ordem de saída)</h2>
+    <h2>Linha do tempo <span class="mut" style="font-weight:400">(ordem de saída)</span></h2>
     <div class="tl" id="tl" role="list" aria-label="Segmentos na ordem de saída"></div>
-    <div id="tlInfo" class="mut" style="margin-top:4px"></div>
-    <table style="margin-top:8px"><thead><tr><th>#</th><th>Saída</th><th>Início (fonte)</th><th>Fim (fonte)</th><th>Dur.</th><th></th></tr></thead><tbody id="segs"></tbody></table>
-    <div class="row" style="margin-top:8px">
-      <label class="mut" style="margin:0">Sugerir cortes (cenas e pausas) entre</label>
+    <div id="tlInfo" class="mut dica"></div>
+    <div class="tabela esp"><table><thead><tr><th>#</th><th>Saída</th><th>Início (fonte)</th><th>Fim (fonte)</th><th>Dur.</th><th></th></tr></thead><tbody id="segs"></tbody></table></div>
+    <h2 class="sub">Sugerir cortes</h2>
+    <div class="row">
+      <label for="sMin" class="mut inline">Cenas e pausas entre</label>
       <input type="number" id="sMin" value="15" min="1" aria-label="mínimo"> e <input type="number" id="sMax" value="60" min="1" aria-label="máximo"> s
       <button id="bSug">Sugerir</button>
     </div>
-    <div id="sugCortes"></div>
+    <div id="sugCortes" class="esp" aria-live="polite"></div>
   </div>
 </section>
 
-<aside>
+<aside aria-label="Legenda, títulos, efeitos, ganchos, referências e exportação">
   <div class="tabs" role="tablist">
     <button data-tab="tLeg" class="on">Legenda</button>
     <button data-tab="tTit">Títulos</button>
@@ -120,32 +193,32 @@
   </div>
 
   <div class="card tab on" id="tLeg">
-    <h2>Legenda (fala transcrita)</h2>
-    <div class="mut">A legenda é a fala de verdade do vídeo. Texto editorial vai em <b>Títulos</b>, com outro visual.</div>
-    <label class="row" style="color:var(--txt)"><input type="checkbox" id="legAtiva"> Legenda ativa</label>
+    <h2>Legenda <span class="mut" style="font-weight:400">(fala transcrita)</span></h2>
+    <div class="mut intro">A legenda é a fala de verdade do vídeo. Texto editorial vai em <b>Títulos</b>, com outro visual.</div>
+    <label class="chk"><input type="checkbox" id="legAtiva"> Legenda ativa</label>
     <div id="transBox"></div>
     <label>Estilo (miniaturas geradas pelo mesmo motor da exportação)</label>
     <div class="presets" id="presets"></div>
-    <details style="margin-top:8px"><summary>Ajustar estilo</summary>
+    <details class="ajuste"><summary>Ajustar estilo</summary>
       <div class="row">
-        <div><label>Fonte</label><input type="text" id="eFonte" list="fontesComuns" style="width:140px"></div>
-        <div><label>Tamanho</label><input type="number" id="eTamanho" min="24" max="180"></div>
-        <div><label>Cor</label><input type="color" id="eCor"></div>
-        <div><label>Contorno</label><input type="number" id="eContorno" min="0" max="16" step="1"></div>
-        <div><label>Cor do contorno</label><input type="color" id="eContornoCor"></div>
+        <div><label for="eFonte">Fonte</label><input type="text" id="eFonte" list="fontesComuns" class="w140"></div>
+        <div><label for="eTamanho">Tamanho</label><input type="number" id="eTamanho" min="24" max="180"></div>
+        <div><label for="eCor">Cor</label><input type="color" id="eCor"></div>
+        <div><label for="eContorno">Contorno</label><input type="number" id="eContorno" min="0" max="16" step="1"></div>
+        <div><label for="eContornoCor">Cor do contorno</label><input type="color" id="eContornoCor"></div>
       </div>
       <div class="row">
-        <label class="row" style="color:var(--txt)"><input type="checkbox" id="eFundo"> Fundo (caixa)</label>
+        <label class="chk"><input type="checkbox" id="eFundo"> Fundo (caixa)</label>
         <input type="color" id="eFundoCor" aria-label="Cor do fundo">
-        <div style="flex:1;min-width:120px"><label>Opacidade do fundo</label><input type="range" id="eFundoOp" min="0" max="1" step="0.05"></div>
+        <div style="flex:1;min-width:120px"><label for="eFundoOp">Opacidade do fundo</label><input type="range" id="eFundoOp" min="0" max="1" step="0.05"></div>
       </div>
-      <div><label>Posição vertical: <span id="ePosV"></span></label><input type="range" id="ePos" min="0.05" max="0.95" step="0.01"></div>
+      <div><label for="ePos">Posição vertical: <span id="ePosV"></span></label><input type="range" id="ePos" min="0.05" max="0.95" step="0.01"></div>
       <div class="row">
-        <label class="row" style="color:var(--txt)"><input type="checkbox" id="eMai"> Maiúsculas</label>
-        <label class="row" style="color:var(--txt)"><input type="checkbox" id="eNeg"> Negrito</label>
-        <label class="row" style="color:var(--txt)"><input type="checkbox" id="eDest"> Destacar a palavra falada</label>
+        <label class="chk"><input type="checkbox" id="eMai"> Maiúsculas</label>
+        <label class="chk"><input type="checkbox" id="eNeg"> Negrito</label>
+        <label class="chk"><input type="checkbox" id="eDest"> Destacar a palavra falada</label>
         <input type="color" id="eDestCor" aria-label="Cor do destaque">
-        <div><label>Palavras por frase</label><input type="number" id="ePpf" min="1" max="12"></div>
+        <div><label for="ePpf">Palavras por frase</label><input type="number" id="ePpf" min="1" max="12"></div>
       </div>
       <datalist id="fontesComuns"><option>Arial</option><option>Segoe UI</option><option>Impact</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Bahnschrift</option></datalist>
     </details>
@@ -157,43 +230,43 @@
     <h2>Títulos editoriais</h2>
     <div class="legal">Títulos são texto do editor, não fala. Aparecem numa caixa clara no alto, separados da legenda, e nunca são atribuídos a quem fala no vídeo.</div>
     <div id="titulos"></div>
-    <button id="bAddTit">Adicionar título</button>
+    <button id="bAddTit" class="esp">Adicionar título</button>
   </div>
 
   <div class="card tab" id="tEf">
-    <h2>Efeitos (cada um independente)</h2>
-    <label>Enquadramento 9:16 — posição horizontal</label><input type="range" id="cropX" min="0" max="1" step="0.01">
-    <label class="row" style="color:var(--txt)"><input type="checkbox" id="zAtivo"> Zoom lento por segmento (alterna aproximar/afastar)</label>
-    <label>Intensidade do zoom: <span id="zV"></span></label><input type="range" id="zInt" min="0.02" max="0.15" step="0.01">
-    <div class="row"><label style="margin:0">Transição</label>
+    <h2>Efeitos <span class="mut" style="font-weight:400">(cada um independente)</span></h2>
+    <label for="cropX">Enquadramento 9:16 — posição horizontal</label><input type="range" id="cropX" min="0" max="1" step="0.01">
+    <label class="chk"><input type="checkbox" id="zAtivo"> Zoom lento por segmento (alterna aproximar/afastar)</label>
+    <label for="zInt">Intensidade do zoom: <span id="zV"></span></label><input type="range" id="zInt" min="0.02" max="0.15" step="0.01">
+    <div class="row esp"><label for="trTipo" class="inline">Transição</label>
       <select id="trTipo"><option value="corte">Corte seco</option><option value="fade">Fade pelo preto (não muda a duração)</option></select>
       <input type="number" id="trDur" min="0.05" max="0.5" step="0.05" aria-label="Duração da transição"> s</div>
-    <h2 style="margin-top:12px">Áudio</h2>
-    <label>Volume do áudio original: <span id="voV"></span></label><input type="range" id="vo" min="0" max="2" step="0.05">
-    <label class="row" style="color:var(--txt)"><input type="checkbox" id="norm"> Normalizar volume (−14 LUFS, padrão comum em vídeo curto)</label>
-    <label>Música (opcional, livre de direitos)</label>
+    <h2 class="sub">Áudio</h2>
+    <label for="vo">Volume do áudio original: <span id="voV"></span></label><input type="range" id="vo" min="0" max="2" step="0.05">
+    <label class="chk"><input type="checkbox" id="norm"> Normalizar volume (−14 LUFS, padrão comum em vídeo curto)</label>
+    <label for="arqMus">Música (opcional, livre de direitos)</label>
     <div class="row"><input type="file" id="arqMus" accept="audio/*"><span id="musInfo" class="mut"></span><button id="bSemMus" class="mini">remover</button></div>
-    <label>Volume da música: <span id="vmV"></span></label><input type="range" id="vm" min="0" max="1" step="0.01">
-    <label class="row" style="color:var(--txt)"><input type="checkbox" id="duck"> Abaixar a música quando alguém fala</label>
+    <label for="vm">Volume da música: <span id="vmV"></span></label><input type="range" id="vm" min="0" max="1" step="0.01">
+    <label class="chk"><input type="checkbox" id="duck"> Abaixar a música quando alguém fala</label>
   </div>
 
   <div class="card tab" id="tGan">
     <h2>Ganchos de abertura</h2>
-    <div class="mut">Sugestões tiradas da fala de verdade (com tempo na fonte) e títulos derivados dela, separados. Nenhuma fala é inventada ou atribuída a quem fala.</div>
-    <div class="row" style="margin-top:6px"><button id="bGanchos" class="pri">Sugerir ganchos</button><span id="ganInfo" class="mut"></span></div>
+    <div class="mut intro">Sugestões tiradas da fala de verdade (com tempo na fonte) e títulos derivados dela, separados. Nenhuma fala é inventada ou atribuída a quem fala.</div>
+    <div class="row esp"><button id="bGanchos" class="pri">Sugerir ganchos</button><span id="ganInfo" class="mut" aria-live="polite"></span></div>
     <div id="ganchos"></div>
   </div>
 
   <div class="card tab" id="tRef">
     <h2>Vídeos de referência</h2>
-    <div id="refCfg" class="mut"></div>
-    <div class="row" style="margin-top:6px">
+    <div id="refCfg" class="mut intro"></div>
+    <div class="row esp">
       <input type="url" id="refUrl" placeholder="URL do YouTube ou TikTok" style="flex:1;min-width:200px" aria-label="URL de referência">
       <button id="bRefUrl">Adicionar URL</button>
     </div>
-    <div class="row" style="margin-top:6px"><label style="margin:0">ou arquivo de referência:</label><input type="file" id="refArq" accept="video/*,.mkv"></div>
+    <div class="row esp"><label for="refArq" class="mut inline">ou arquivo de referência:</label><input type="file" id="refArq" accept="video/*,.mkv"></div>
     <div id="refs"></div>
-    <h2 style="margin-top:12px">Comparação e recomendações</h2>
+    <h2 class="sub">Comparação e recomendações</h2>
     <button id="bComparar">Comparar com o meu vídeo</button>
     <div id="comparacao"></div>
   </div>
@@ -205,9 +278,10 @@
       <button id="bExportar">Exportar 1080×1920</button>
       <button id="bComparaVers" title="Prévia lado a lado de duas versões">Comparar versões</button>
     </div>
-    <div id="tarefa"></div>
+    <div id="tarefa" class="esp"></div>
     <div id="previaBox"></div>
-    <div class="mut" style="margin-top:6px">A prévia é renderizada a partir do mesmo plano da exportação, só em resolução menor. Depois de baixar: ative o toggle "conteúdo gerado por IA" no TikTok quando houver voz ou imagem sintética. Abaixo de 61s não conta para o Creator Rewards.</div>
+    <div class="mut dica">A prévia é renderizada a partir do mesmo plano da exportação, só em resolução menor.</div>
+    <div class="legal">Depois de baixar: ative o toggle "conteúdo gerado por IA" no TikTok quando houver voz ou imagem sintética. Abaixo de 61s não conta para o Creator Rewards.</div>
   </div>
 </aside>
 </main>
