@@ -48,6 +48,19 @@ def main():
     for exe in (ffmpeg, ffprobe):   # o atalho do winget é um link: copia o arquivo de verdade
         real = Path(exe).resolve()
         shutil.copy2(real, DESTINO / "ffmpeg" / real.name)
+    # GPL: a licença e o README do build vão junto, com onde obter o código-fonte
+    pacote = Path(ffmpeg).resolve().parent.parent
+    for nome, destino in (("LICENSE", "LICENSE.txt"), ("README.txt", "README-build-gyan.txt")):
+        if (pacote / nome).exists():
+            shutil.copy2(pacote / nome, DESTINO / "ffmpeg" / destino)
+    versao = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True).stdout.split()[2]
+    numero = versao.split("-")[0]
+    (DESTINO / "ffmpeg" / "FONTES.txt").write_text(
+        f"ffmpeg/ffprobe {versao} (build estático de https://www.gyan.dev/ffmpeg/builds/), licença GPL v3 (LICENSE.txt).\n"
+        f"Código-fonte do FFmpeg desta versão: https://ffmpeg.org/releases/ffmpeg-{numero}.tar.xz\n"
+        "(também anexado na Release do Corte Studio no GitHub).\n"
+        "As bibliotecas externas incluídas no build e suas versões estão listadas em README-build-gyan.txt e na página\n"
+        "do build acima, com os links para o código de cada uma.\n", encoding="utf-8")
     (DESTINO / "LEIA-ME.txt").write_text(LEIA_ME, encoding="utf-8-sig")
     total = sum(f.stat().st_size for f in DESTINO.rglob("*") if f.is_file())
     print(f"\nPronto: {DESTINO / 'CorteStudio.exe'}  ({total / 1e6:.0f} MB na pasta)")

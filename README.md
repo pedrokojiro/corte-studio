@@ -6,6 +6,13 @@ Duas ferramentas locais, sem conta, sem login e sem publicação automática (vo
 - **`app.py` + `index.html`** (modo simples): front-end no navegador para cortar vídeo em 9:16 com legenda, narração e trilha.
 - **`dark.py`**: pipeline por linha de comando que transforma um roteiro JSON e imagens geradas por você em vídeo vertical narrado.
 
+## Baixar (Windows, sem instalar nada)
+Na página de [Releases](https://github.com/pedrokojiro/corte-studio/releases/latest), baixe `CorteStudio-<versão>-windows-x64.zip`
+(~280 MB; já traz o ffmpeg). Descompacte numa pasta onde você pode gravar (Documentos, Área de Trabalho) e dê dois
+cliques em `CorteStudio\CorteStudio.exe`. **Não** é o `construir_exe.bat`: esse só gera o executável a partir do código.
+O .exe não é assinado: o SmartScreen pode avisar "o Windows protegeu o computador" → "Mais informações" → "Executar assim mesmo".
+Confira o arquivo pela soma SHA-256 publicada junto. O código-fonte do ffmpeg incluído (GPL v3) também está anexado na Release.
+
 ## Instalar e abrir
 1. Python **3.12 ou mais novo** (as versões fixadas de numpy e av exigem). Testado com 3.13.5.
 2. ffmpeg no PATH. No Windows: `winget install Gyan.FFmpeg`, depois reabra o terminal e teste com `ffmpeg -version`.

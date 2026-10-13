@@ -11,7 +11,14 @@ if not exist "%VPY%" (
   goto fim
 )
 "%VPY%" construir_exe.py
-if errorlevel 1 echo [ERRO] O executavel nao foi gerado. Leia a mensagem acima.
+if errorlevel 1 (
+  echo [ERRO] O executavel nao foi gerado. Leia a mensagem acima.
+  goto fim
+)
+echo.
+echo Este arquivo so GERA o app; ele nao abre o app.
+echo Para abrir: dist\CorteStudio\CorteStudio.exe (a pasta vai abrir agora com ele selecionado).
+explorer /select,"%~dp0dist\CorteStudio\CorteStudio.exe"
 :fim
 echo.
 pause
