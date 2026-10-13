@@ -5,131 +5,201 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Corte Studio</title>
 <style>
-  :root{--bg:#10131a;--card:#181d27;--line:#2a3140;--txt:#e7eaf0;--mut:#8a93a6;--acc:#e0603f;--ok:#3fb27f;--warn:#e0b13f}
+  /* Paleta escura discreta, um único acento (--acc). ok/warn/bad são só para estado. */
+  :root{
+    --bg:#0e1014;--card:#15181e;--card2:#1b1f27;--line:#262b35;--line2:#363c48;
+    --txt:#e9ebf0;--mut:#9ba2b0;--acc:#f0784f;--acc-txt:#1b0e08;
+    --ok:#4cc38a;--warn:#e6b450;--bad:#f07070;
+    --r:12px;--r-sm:8px;
+    color-scheme:dark;
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif}
-  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:baseline}
-  header h1{font-size:17px;margin:0}
-  header span{color:var(--mut);font-size:12px}
-  main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;padding:16px 20px;max-width:1400px;margin:0 auto}
-  @media(max-width:980px){main{grid-template-columns:1fr}}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
-  .card h2{font-size:13px;margin:0 0 10px;color:var(--acc);text-transform:uppercase;letter-spacing:.04em}
-  label{display:block;color:var(--mut);font-size:12px;margin:8px 0 3px}
-  input[type=text],input[type=number],select,textarea{width:100%;background:#0e1118;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit}
-  textarea{min-height:120px;resize:vertical}
-  input[type=range]{width:100%}
-  button{background:#232a38;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 11px;font:inherit;cursor:pointer}
-  button:hover{border-color:var(--acc)}
-  button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600;padding:10px 14px;width:100%}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  .row{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
-  .row>*{flex:1;min-width:90px}
-  .stage{position:relative;background:#000;border-radius:8px;overflow:hidden;display:inline-block;max-width:100%}
+  [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:var(--acc)}
+  :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .pular{position:absolute;left:-9999px;top:8px;z-index:10;background:var(--card2);color:var(--txt);padding:8px 12px;border-radius:var(--r-sm)}
+  .pular:focus{left:16px}
+
+  .topo{border-bottom:1px solid var(--line)}
+  .topo-in{max-width:1360px;margin:0 auto;padding:22px 24px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline}
+  .topo h1{font-size:18px;font-weight:650;margin:0;letter-spacing:-.01em}
+  .topo p{margin:0;color:var(--mut);font-size:13px}
+
+  main{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:24px;padding:24px;max-width:1360px;margin:0 auto;align-items:start}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:20px}
+  .card h2{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600;margin:0 0 16px}
+  .card h2 .n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;font-size:12px;font-weight:600;color:var(--acc);border:1px solid var(--line2);background:var(--card2)}
+  .card h3{font-size:13px;font-weight:600;margin:0 0 4px;color:var(--txt)}
+
+  label{display:block;color:var(--mut);font-size:12.5px;margin:14px 0 6px}
+  input[type=text],input[type=number],select,textarea{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:9px 11px;font:inherit;transition:border-color .15s}
+  input[type=text]:hover,input[type=number]:hover,select:hover,textarea:hover{border-color:#4a5162}
+  input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{border-color:var(--acc)}
+  textarea{min-height:140px;resize:vertical;line-height:1.5}
+  input[type=range]{width:100%;accent-color:var(--acc);margin:4px 0}
+  input[type=checkbox]{accent-color:var(--acc);width:16px;height:16px;margin:0}
+  input[type=file]{width:100%;color:var(--mut);font:inherit;font-size:13px}
+  input[type=file]::file-selector-button{background:var(--card2);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:8px 14px;margin-right:12px;font:inherit;cursor:pointer}
+  input[type=file]::file-selector-button:hover{border-color:#4a5162}
+
+  button{background:var(--card2);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:8px 14px;font:inherit;cursor:pointer;transition:background .15s,border-color .15s}
+  button:hover{background:#232835;border-color:#4a5162}
+  button.pri{background:var(--acc);border-color:var(--acc);color:var(--acc-txt);font-weight:600}
+  button.pri:hover{background:#f48a66;border-color:#f48a66}
+  button.largo{width:100%;padding:12px 16px;font-size:15px}
+  button:disabled,button:disabled:hover{opacity:.45;cursor:not-allowed;background:var(--card2);border-color:var(--line2)}
+  button.pri:disabled,button.pri:disabled:hover{background:var(--acc);border-color:var(--acc)}
+
+  .row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+  .row>div{flex:1 1 110px;min-width:0}
+  .row>button{flex:0 0 auto}
+  .checks{gap:20px}
+  .checks label{display:flex;gap:8px;align-items:center;color:var(--txt);font-size:14px;margin:16px 0 0;cursor:pointer}
+  .esp{margin-top:16px} .dica{margin-top:8px}
+  .sep{border-top:1px solid var(--line);margin-top:22px;padding-top:18px}
+
+  .palco{margin-top:16px}
+  .stage{position:relative;background:#000;border-radius:10px;overflow:hidden;display:inline-block;max-width:100%}
   .stage video{display:block;max-width:100%;max-height:60vh}
-  .crop{position:absolute;top:0;bottom:0;border:2px solid var(--acc);background:rgba(224,96,63,.12);pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.55)}
-  .mut{color:var(--mut);font-size:12px}
-  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:#232a38}
-  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:#e05a5a}
-  table{width:100%;border-collapse:collapse}
-  td,th{padding:5px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
-  .legal{border-left:3px solid var(--warn);padding:8px 10px;background:#1d1a12;border-radius:4px;font-size:12px;color:#d9c48a;margin-bottom:8px}
-  #msg{min-height:20px;margin-top:8px}
-  #result video{width:100%;max-height:70vh;border-radius:8px;background:#000}
-  kbd{background:#232a38;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+  .crop{position:absolute;top:0;bottom:0;border:2px solid var(--acc);background:rgba(240,120,79,.10);pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.55)}
+
+  .mut{color:var(--mut);font-size:12.5px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--card2)}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+
+  .tabela,#sug{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th{font-weight:500;color:var(--mut);font-size:12px}
+  td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+  tbody tr:last-child td{border-bottom:0}
+  td button{padding:4px 10px;font-size:12.5px}
+  #sug table{margin-top:8px}
+
+  .legal{border:1px solid rgba(230,180,80,.28);background:rgba(230,180,80,.06);color:#ecd59b;border-radius:var(--r-sm);padding:10px 12px;font-size:12.5px;margin-top:14px}
+  #msg{min-height:20px;margin-top:12px}
+  #result video{width:100%;max-height:70vh;border-radius:10px;background:#000;margin-top:12px}
+  kbd{background:var(--card2);border:1px solid var(--line2);border-radius:4px;padding:0 5px;font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--txt)}
+
+  @media(max-width:980px){main{grid-template-columns:1fr;padding:16px;gap:0}}
+  @media(max-width:520px){.topo-in{padding:16px}.card{padding:16px;margin-bottom:16px}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
-<header><h1>Corte Studio</h1><span>cortes 9:16, legenda, narração de IA e trilha. Roda local, no seu PC.</span></header>
-<main>
-<section>
+<a class="pular" href="#conteudo">Pular para o conteúdo</a>
+<header class="topo">
+  <div class="topo-in">
+    <h1>Corte Studio</h1>
+    <p>Cortes 9:16, legenda, narração de IA e trilha. Roda local, no seu PC.</p>
+  </div>
+</header>
+<main id="conteudo">
+<section aria-label="Vídeo e enquadramento">
   <div class="card">
-    <h2>1. Vídeo e cortes</h2>
+    <h2><span class="n" aria-hidden="true">1</span>Vídeo e cortes</h2>
+    <label for="arq">Arquivo de vídeo</label>
     <input type="file" id="arq" accept="video/*,.mkv">
-    <div id="info" class="mut" style="margin-top:6px"></div>
-    <div style="margin-top:10px">
+    <div id="info" class="mut dica"></div>
+    <div class="palco">
       <div class="stage" id="stage" hidden>
         <video id="vid" controls playsinline></video>
         <div class="crop" id="crop"></div>
       </div>
     </div>
-    <div class="row" style="margin-top:10px">
-      <div><label>Início (s)</label><input type="number" id="ini" step="0.1" min="0" value="0"></div>
-      <div><label>Fim (s)</label><input type="number" id="fim" step="0.1" min="0" value="0"></div>
+    <div class="row">
+      <div><label for="ini">Início (s)</label><input type="number" id="ini" step="0.1" min="0" value="0"></div>
+      <div><label for="fim">Fim (s)</label><input type="number" id="fim" step="0.1" min="0" value="0"></div>
       <button id="bIni" title="atalho: I">Marcar início</button>
       <button id="bFim" title="atalho: O">Marcar fim</button>
-      <button id="bAdd" class="pri" style="width:auto;padding:7px 12px" title="atalho: Enter">Adicionar corte</button>
+      <button id="bAdd" class="pri" title="atalho: Enter">Adicionar corte</button>
     </div>
-    <div class="mut" style="margin-top:6px">Atalhos: <kbd>I</kbd> início, <kbd>O</kbd> fim, <kbd>Enter</kbd> adicionar, <kbd>Espaço</kbd> play/pause.</div>
-    <table id="tab" style="margin-top:10px"><thead><tr><th>#</th><th>Início</th><th>Fim</th><th>Dur.</th><th></th></tr></thead><tbody></tbody></table>
-    <div id="total" class="mut" style="margin-top:6px"></div>
-    <div class="row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
-      <div><label>Corte mín. (s)</label><input type="number" id="smin" min="1" step="1" value="15"></div>
-      <div><label>Corte máx. (s)</label><input type="number" id="smax" min="1" step="1" value="60"></div>
-      <button id="bSug">Sugerir cortes</button>
+    <div class="mut dica">Atalhos: <kbd>I</kbd> início, <kbd>O</kbd> fim, <kbd>Enter</kbd> adicionar, <kbd>Espaço</kbd> play/pause.</div>
+    <div class="tabela esp"><table id="tab"><thead><tr><th>#</th><th>Início</th><th>Fim</th><th>Dur.</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div id="total" class="mut dica"></div>
+    <div class="sep">
+      <h3>Sugestão de cortes</h3>
+      <div class="mut">Analisa trocas de cena e pausas de fala e sugere cortes que não interrompem frases. Não entende o conteúdo: confira cada um no "ver".</div>
+      <div class="row">
+        <div><label for="smin">Corte mín. (s)</label><input type="number" id="smin" min="1" step="1" value="15"></div>
+        <div><label for="smax">Corte máx. (s)</label><input type="number" id="smax" min="1" step="1" value="60"></div>
+        <button id="bSug">Sugerir cortes</button>
+      </div>
+      <div id="sug" class="esp" aria-live="polite"></div>
     </div>
-    <div class="mut" style="margin-top:4px">Analisa trocas de cena e pausas de fala e sugere cortes que não interrompem frases. Não entende o conteúdo: confira cada um no "ver".</div>
-    <div id="sug" style="margin-top:8px"></div>
   </div>
 
   <div class="card">
-    <h2>2. Enquadramento 9:16</h2>
-    <label>Posição horizontal do recorte</label>
+    <h2><span class="n" aria-hidden="true">2</span>Enquadramento 9:16</h2>
+    <label for="cx">Posição horizontal do recorte</label>
     <input type="range" id="cx" min="0" max="1" step="0.01" value="0.5">
-    <div class="mut">A moldura laranja no vídeo mostra o que fica dentro do 9:16. Vale para todos os cortes.</div>
+    <div class="mut dica">A moldura laranja no vídeo mostra o que fica dentro do 9:16. Vale para todos os cortes.</div>
   </div>
 </section>
 
-<aside>
+<aside aria-label="Narração, trilha e exportação">
   <div class="card">
-    <h2>3. Narração e legenda</h2>
-    <label>Voz</label>
+    <h2><span class="n" aria-hidden="true">3</span>Narração e legenda</h2>
+    <label for="modo">Voz</label>
     <select id="modo">
       <option value="nenhuma">Sem narração: usar a fala do próprio vídeo</option>
       <option value="ia">Gerar com IA (edge-tts)</option>
       <option value="arquivo">Enviar áudio meu</option>
     </select>
     <div id="boxIA">
-      <label>Voz da IA</label>
+      <label for="voz">Voz da IA</label>
       <select id="voz">
         <option value="pt-BR-AntonioNeural">Antonio (masculina)</option>
         <option value="pt-BR-FranciscaNeural">Francisca (feminina)</option>
       </select>
-      <label>Velocidade: <span id="txv">-5%</span></label>
+      <label for="taxa">Velocidade: <span id="txv">-5%</span></label>
       <input type="range" id="taxa" min="-30" max="20" step="5" value="-5">
     </div>
     <div id="boxArq" hidden>
-      <label>Arquivo de áudio da narração</label>
+      <label for="narrArq">Arquivo de áudio da narração</label>
       <input type="file" id="narrArq" accept="audio/*">
-      <div id="narrInfo" class="mut"></div>
+      <div id="narrInfo" class="mut dica"></div>
     </div>
     <div id="boxTxt">
-      <label id="txtLbl">Texto da narração (também vira legenda)</label>
-      <div id="boxTrans" class="row" style="margin-bottom:6px"><button id="bTrans">Transcrever fala</button><span id="transInfo" class="mut" style="flex:3"></span></div>
+      <label id="txtLbl" for="texto">Texto da narração (também vira legenda)</label>
+      <div id="boxTrans" class="row" style="margin-bottom:10px;align-items:center"><button id="bTrans">Transcrever fala</button><span id="transInfo" class="mut" style="flex:1 1 160px" aria-live="polite"></span></div>
       <textarea id="texto" placeholder="Escreva a narração original. Gancho nos primeiros 3 segundos."></textarea>
-      <div class="mut" id="estim"></div>
+      <div class="mut dica" id="estim"></div>
+      <div id="legEstado" class="mut" style="margin-top:4px" aria-live="polite"></div>
     </div>
-    <div class="row">
-      <label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="leg" checked> Legenda</label>
-      <label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="mai" checked> Maiúsculas</label>
+    <div class="row checks">
+      <label><input type="checkbox" id="leg" checked> Legenda</label>
+      <label><input type="checkbox" id="mai" checked> Maiúsculas</label>
     </div>
-    <label>Volume do áudio original: <span id="tvo">12%</span></label>
+    <label for="vo">Volume do áudio original: <span id="tvo">12%</span></label>
     <input type="range" id="vo" min="0" max="100" step="1" value="12">
   </div>
 
   <div class="card">
-    <h2>4. Trilha (opcional)</h2>
+    <h2><span class="n" aria-hidden="true">4</span>Trilha <span class="mut" style="font-weight:400">(opcional)</span></h2>
+    <label for="musArq" style="margin-top:0">Arquivo da trilha</label>
     <input type="file" id="musArq" accept="audio/*">
-    <div class="mut">Use trilha livre de direitos ou da biblioteca do TikTok.</div>
-    <label>Volume da trilha: <span id="tvm">10%</span></label>
+    <div class="mut dica">Use trilha livre de direitos ou da biblioteca do TikTok.</div>
+    <label for="vm">Volume da trilha: <span id="tvm">10%</span></label>
     <input type="range" id="vm" min="0" max="100" step="1" value="10">
   </div>
 
   <div class="card">
-    <button class="pri" id="go">Renderizar vídeo</button>
-    <div id="msg"></div>
+    <h2><span class="n" aria-hidden="true">5</span>Renderizar</h2>
+    <button class="pri largo" id="go">Renderizar vídeo</button>
+    <div id="msg" aria-live="polite"></div>
     <div id="result"></div>
-    <div class="mut" style="margin-top:8px">Depois de baixar: ative o toggle "conteúdo gerado por IA" no TikTok quando houver voz ou cena sintética.</div>
+    <div class="legal">Depois de baixar: ative o toggle "conteúdo gerado por IA" no TikTok quando houver voz ou cena sintética.</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n" aria-hidden="true">6</span>Espaço em disco</h2>
+    <div id="espaco" class="mut">...</div>
+    <div class="row esp">
+      <button id="bLimpaTmp">Limpar temporários</button>
+      <button id="bLimpaUp">Limpar uploads</button>
+    </div>
+    <div class="mut dica">Nada é apagado sozinho. "Limpar uploads" remove as cópias que você enviou ao app, menos as abertas nesta tela. Seus arquivos originais e os vídeos prontos (pasta saida) nunca são tocados.</div>
   </div>
 </aside>
 </main>
@@ -139,11 +209,17 @@ const $ = id => document.getElementById(id);
 const S = {video: null, narr: null, mus: null, cortes: []};
 const fmt = t => { const m = Math.floor(t/60), s = (t%60).toFixed(1).padStart(4,'0'); return m+':'+s; };
 
+// Respostas que não são JSON (erro inesperado, proxy, servidor fora) viram uma mensagem legível.
+async function lerJSON(r){
+  try{ return await r.json(); }
+  catch(e){ return {erro: `Resposta inesperada do servidor (HTTP ${r.status}). Veja a janela do app.`}; }
+}
 async function envia(file){
   const fd = new FormData(); fd.append('arquivo', file);
   const r = await fetch('/upload', {method:'POST', body: fd});
-  const j = await r.json();
+  const j = await lerJSON(r);
   if(!r.ok) throw new Error(j.erro || 'Falha no envio');
+  setTimeout(espaco, 0);  // depois de quem chamou guardar o id em S (mostra como preservado)
   return j;
 }
 function msg(t, cls){ $('msg').innerHTML = t ? `<span class="${cls||''}">${t}</span>` : ''; }
@@ -177,7 +253,7 @@ $('bAdd').onclick = () => {
   S.cortes.push({ini, fim}); renderTab(); msg('');
 };
 function renderTab(){
-  if(S.tempos && S.tempSrc === 'video' && S.tempKey !== JSON.stringify(S.cortes)){ S.tempos = null; $('transInfo').innerHTML = '<span class="warn">Os cortes mudaram: clique em Transcrever de novo.</span>'; }
+  estadoLegenda();
   const tb = $('tab').querySelector('tbody'); tb.innerHTML = '';
   S.cortes.forEach((c, i) => {
     const tr = document.createElement('tr');
@@ -212,7 +288,7 @@ $('bSug').onclick = async () => {
   try{
     const r = await fetch('/analisar', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({video_id: S.video.id, min: parseFloat($('smin').value), max: parseFloat($('smax').value)})});
-    const j = await r.json(); if(!r.ok) throw new Error(j.erro || 'Falha na análise');
+    const j = await lerJSON(r); if(!r.ok) throw new Error(j.erro || 'Falha na análise');
     SUG = j.sugestoes;
     const cab = `<div class="mut">${j.cenas} trocas de cena, ${j.pausas} pausas, ${j.segundos}s de análise. ${SUG.length} sugestões.</div>`;
     if(!SUG.length){ $('sug').innerHTML = cab + '<div class="warn">Nenhum corte limpo nessa faixa. Tente aumentar o máximo ou diminuir o mínimo.</div>'; }
@@ -237,12 +313,42 @@ $('modo').onchange = () => {
     m === 'arquivo' ? 'Legenda: clique em Transcrever (lê o seu áudio) e corrija o que estiver errado' :
     'Legenda: adicione os cortes, clique em Transcrever e corrija o que estiver errado';
   $('texto').placeholder = m === 'ia' ? 'Escreva a narração original. Gancho nos primeiros 3 segundos.' : 'O texto transcrito aparece aqui. Deixe vazio para não ter legenda.';
-  if(S.tempos && S.tempSrc !== (m === 'arquivo' ? 'narr' : 'video')){ S.tempos = null; $('transInfo').textContent = ''; }
+  estadoLegenda();
   $('vo').value = m === 'nenhuma' ? 100 : 12; $('tvo').textContent = $('vo').value + '%';
 };
 $('taxa').oninput = () => $('txv').textContent = ($('taxa').value >= 0 ? '+' : '') + $('taxa').value + '%';
 $('vo').oninput = () => $('tvo').textContent = $('vo').value + '%';
 $('vm').oninput = () => $('tvm').textContent = $('vm').value + '%';
+const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// De onde a transcrição atual teria de vir: os cortes do vídeo (sem narração) ou o áudio enviado.
+function fonteAtual(){
+  const m = $('modo').value;
+  if(m === 'arquivo') return 'a:' + (S.narr ? S.narr.id : '');
+  return 'v:' + (S.video ? S.video.id : '') + ':' + JSON.stringify(S.cortes.map(c => [c.ini, c.fim]));
+}
+// Mostra, antes do render, o que vai acontecer com a legenda.
+function estadoLegenda(){
+  const m = $('modo').value, el = $('legEstado');
+  if(m === 'ia' || !$('leg').checked){ el.innerHTML = ''; return; }
+  const temTexto = $('texto').value.trim().length > 0;
+  let cls = 'warn', t;
+  if(S.tempos && S.tempFonte === fonteAtual()){
+    cls = 'ok'; t = temTexto ? 'Legenda: sincronizada por palavra com ' + (m === 'arquivo' ? 'o áudio enviado.' : 'os cortes atuais.')
+                             : 'Legenda: o texto está vazio, o vídeo sairá sem legenda.';
+    if(!temTexto) cls = 'warn';
+  } else if(S.tempos){
+    t = 'Legenda desatualizada: ' + (m === 'arquivo' ? 'o áudio mudou' : 'os cortes mudaram') +
+        ' depois da transcrição. Ao renderizar, o app transcreve de novo e encaixa o seu texto (ou clique em Transcrever fala).';
+  } else if(!temTexto){
+    t = 'Sem texto: o vídeo sairá sem legenda. Clique em Transcrever fala para gerar.';
+  } else if(m === 'arquivo'){
+    t = 'Sem transcrição: ao renderizar, o app tenta transcrever o áudio; se não conseguir, a legenda sai proporcional ao texto.';
+  } else {
+    t = 'Sem transcrição: ao renderizar, o app transcreve a fala dos cortes automaticamente.';
+  }
+  el.innerHTML = `<span class="${cls}">${t}</span>`;
+}
+$('leg').addEventListener('change', estadoLegenda);
 $('bTrans').onclick = async () => {
   const m = $('modo').value;
   if(!S.video) return msg('Envie um vídeo primeiro.', 'warn');
@@ -253,21 +359,22 @@ $('bTrans').onclick = async () => {
   $('transInfo').textContent = 'Transcrevendo... (na 1a vez carrega o modelo; leva cerca de 1/3 da duração do áudio)';
   try{
     const r = await fetch('/transcrever', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const j = await r.json(); if(!r.ok) throw new Error(j.erro || 'Falha na transcrição');
+    const j = await lerJSON(r); if(!r.ok) throw new Error(j.erro || 'Falha na transcrição');
     $('texto').value = j.texto; $('texto').oninput();
-    S.tempos = j.tempos; S.tempSrc = m === 'arquivo' ? 'narr' : 'video'; S.tempKey = JSON.stringify(S.cortes);
+    S.tempos = j.tempos; S.tempChave = j.chave; S.tempFonte = fonteAtual(); estadoLegenda();
     $('transInfo').innerHTML = `<span class="ok">Transcrito em ${j.segundos}s. Corrija o texto à vontade: a legenda continua sincronizada.</span>`;
   }catch(err){ $('transInfo').innerHTML = `<span class="bad">${err.message}</span>`; }
   $('bTrans').disabled = false;
 };
 $('texto').oninput = () => {
+  estadoLegenda();
   if($('modo').value !== 'ia'){ $('estim').textContent = ''; return; }
   const n = $('texto').value.length;
   $('estim').textContent = n ? `${n} caracteres, cerca de ${(n/15).toFixed(0)}s de fala [ESTIMATIVA]` : '';
 };
 $('narrArq').onchange = async e => {
   const f = e.target.files[0]; if(!f) return;
-  try{ S.narr = await envia(f); if(S.tempSrc === 'narr') S.tempos = null; $('narrInfo').textContent = `${S.narr.nome} | ${fmt(S.narr.duracao)}`; }
+  try{ S.narr = await envia(f); estadoLegenda(); $('narrInfo').textContent = `${S.narr.nome} | ${fmt(S.narr.duracao)}`; }
   catch(err){ msg(err.message, 'bad'); }
 };
 $('musArq').onchange = async e => {
@@ -284,22 +391,47 @@ $('go').onclick = async () => {
     video_id: S.video.id, nome: S.video.nome.replace(/\.[^.]+$/, ''), nome_original: S.video.nome,
     cortes: S.cortes, crop_x: parseFloat($('cx').value),
     narracao: modo, texto: $('texto').value, voz: $('voz').value, taxa: ($('taxa').value >= 0 ? '+' : '') + $('taxa').value + '%',
-    audio_id: S.narr && S.narr.id, tempos: modo !== 'ia' ? S.tempos : null, legenda: $('leg').checked, maiuscula: $('mai').checked,
+    audio_id: S.narr && S.narr.id, tempos: modo !== 'ia' ? S.tempos : null, tempos_chave: S.tempChave || null, legenda: $('leg').checked, maiuscula: $('mai').checked,
     volume_original: $('vo').value / 100, musica_id: S.mus && S.mus.id, volume_musica: $('vm').value / 100
   };
   $('go').disabled = true; $('result').innerHTML = '';
   msg('Renderizando... pode levar alguns minutos.');
   try{
     const r = await fetch('/render', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const j = await r.json();
+    const j = await lerJSON(r);
     if(!r.ok) throw new Error(j.erro || 'Falha no render');
-    msg(`Pronto: ${j.duracao.toFixed(1)}s. ` + (j.aviso ? `<span class="warn">${j.aviso}</span>` : ''), 'ok');
+    msg(`Pronto: ${j.duracao.toFixed(1)}s.` + (j.avisos || []).map(a => `<br><span class="warn">⚠ ${esc(a)}</span>`).join(''), 'ok');
     $('result').innerHTML = `<video controls src="/saida/${j.arquivo}"></video>
       <p><a href="/saida/${j.arquivo}?dl=1" style="color:var(--acc)">Baixar ${j.arquivo}</a><br>
       <span class="mut">Também salvo na pasta "saida" do app, com um registro .json.</span></p>`;
   }catch(err){ msg(err.message, 'bad'); }
   $('go').disabled = false;
 };
+// ---- limpeza explícita
+const abertos = () => [S.video, S.narr, S.mus].filter(Boolean).map(x => x.id);
+async function espaco(){
+  try{
+    const j = await lerJSON(await fetch('/limpeza?manter=' + abertos().join(',')));
+    if(j.erro) throw new Error(j.erro);
+    const u = j.uploads, t = j.tmp;
+    $('espaco').textContent = `Uploads: ${u.removiveis.mb} MB removíveis (${u.removiveis.arquivos} arquivos), ` +
+      `${u.preservados.arquivos} em uso preservados. Temporários: ${t.removiveis.mb} MB removíveis` +
+      (t.preservados.arquivos ? `, ${t.preservados.arquivos} em uso agora.` : '.');
+  }catch(err){ $('espaco').textContent = 'Não consegui ler o espaço: ' + err.message; }
+}
+async function limpar(alvo){
+  const r = await fetch('/limpeza', {method:'POST', headers:{'Content-Type':'application/json'},
+                                     body: JSON.stringify({alvo, manter: abertos()})});
+  const j = await lerJSON(r);
+  if(!r.ok) return msg(j.erro || 'Falha na limpeza', 'bad');
+  msg(`Limpeza: ${j.removidos} itens, ${j.mb} MB liberados` + (j.falhas.length ? `. Não deu para apagar: ${j.falhas.join(', ')}` : '.'), 'ok');
+  espaco();
+}
+$('bLimpaTmp').onclick = () => limpar('tmp');
+$('bLimpaUp').onclick = () => {
+  if(confirm('Apagar as cópias enviadas ao app (pasta uploads), menos as abertas nesta tela?\nSeus originais e os vídeos prontos não são tocados.')) limpar('uploads');
+};
+espaco();
 $('modo').onchange();
 </script>
 </body>

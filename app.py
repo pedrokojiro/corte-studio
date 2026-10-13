@@ -8,6 +8,8 @@ A transcrição (faster-whisper) roda local.
 O app não verifica direitos autorais: a responsabilidade é sua.
 """
 import asyncio
+import collections
+import contextlib
 import difflib
 import json
 import math
@@ -15,15 +17,29 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import unicodedata
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import Flask, jsonify, request, send_file, abort
+from werkzeug.exceptions import HTTPException
 
-ROOT = Path(__file__).resolve().parent
+# Rodando como `python app.py`, este módulo é __main__; registra-o também como `app` para os módulos
+# do editor (que fazem `import app`) usarem esta mesma instância, e não uma segunda cópia.
+sys.modules.setdefault("app", sys.modules[__name__])
+
+# Executável (PyInstaller): as páginas vêm empacotadas (somente leitura, em _MEIPASS) e os DADOS (uploads, saída,
+# cache, projetos, config_local.env) ficam na pasta do .exe. Rodando do código-fonte, as duas são a pasta do app.
+CONGELADO = getattr(sys, "frozen", False)
+RECURSOS = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+ROOT = Path(sys.executable).resolve().parent if CONGELADO else Path(__file__).resolve().parent
+if CONGELADO and (ROOT / "ffmpeg" / "ffmpeg.exe").exists():   # ffmpeg/ffprobe que vêm junto com o executável
+    os.environ["PATH"] = str(ROOT / "ffmpeg") + os.pathsep + os.environ.get("PATH", "")
 UP, OUT, TMP = ROOT / "uploads", ROOT / "saida", ROOT / "tmp"
 for d in (UP, OUT, TMP):
     d.mkdir(exist_ok=True)
@@ -32,20 +48,48 @@ app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 ** 3
 
 W, H, FPS = 1080, 1920, 30
+SR = 44100  # taxa de amostragem do áudio de trabalho
 MIN_ELEGIVEL = 61.0  # Creator Rewards: vídeo acima de 1 minuto [DADO, fonte secundária]
 ORIGENS = {"dominio_publico", "proprio", "licenciado"}
 EXT_OK = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 
 
 class Erro(Exception):
-    pass
+    """Erro com mensagem para o usuário; `status` vira o código HTTP."""
+
+    def __init__(self, msg, status=400):
+        super().__init__(msg)
+        self.status = status
 
 
-def run(cmd, cwd=None):
+def _float(v):
     try:
-        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        x = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return x if x == x and x > 0 else 0.0  # descarta NaN e não-positivos
+
+
+def prazo_midia(segundos):
+    """Prazo generoso para processar `segundos` de mídia (CPU lenta incluída)."""
+    return 120 + 10 * max(0.0, segundos)
+
+
+def executar(cmd, cwd=None, timeout=600, texto=True):
+    """subprocess.run com prazo. Se estourar, o subprocess.run encerra (kill) o processo filho
+    e espera ele sair antes do erro: não sobra ffmpeg órfão."""
+    kw = {"text": True, "encoding": "utf-8", "errors": "replace"} if texto else {}
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout, **kw)
     except FileNotFoundError:
         raise Erro(f"'{cmd[0]}' não encontrado. Instale o ffmpeg e coloque no PATH.")
+    except subprocess.TimeoutExpired:
+        raise Erro(f"O {cmd[0]} passou de {timeout:.0f}s e foi interrompido. Tente um trecho menor, "
+                   "um arquivo mais leve ou feche outros programas pesados.", 504)
+
+
+def run(cmd, cwd=None, timeout=600):
+    r = executar(cmd, cwd=cwd, timeout=timeout)
     if r.returncode != 0:
         tail = " | ".join(r.stderr.strip().splitlines()[-6:])
         raise Erro(f"Falha no {cmd[0]}: {tail}")
@@ -54,12 +98,20 @@ def run(cmd, cwd=None):
 
 def probe(path):
     out = run(["ffprobe", "-v", "error", "-show_entries",
-               "format=duration:stream=codec_type,width,height", "-of", "json", str(path)])
-    info = json.loads(out)
-    streams = info.get("streams", [])
+               "format=duration:stream=codec_type,width,height,duration", "-of", "json", str(path)], timeout=60)
+    try:
+        info = json.loads(out or "{}")
+    except ValueError:
+        raise Erro("Não consegui ler as informações desse arquivo.")
+    streams = info.get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None)
+    dur = _float((info.get("format") or {}).get("duration")) or max(
+        (_float(s.get("duration")) for s in streams), default=0.0)
+    if not dur:
+        raise Erro("Esse arquivo não informa a duração (comum em gravação 'ao vivo'). "
+                   "Converta antes: ffmpeg -i entrada -c copy saida.mp4")
     return {
-        "duracao": float(info["format"]["duration"]),
+        "duracao": dur,
         "tem_audio": any(s.get("codec_type") == "audio" for s in streams),
         "largura": v.get("width") if v else None,
         "altura": v.get("height") if v else None,
@@ -90,17 +142,14 @@ def slug(s):
 
 
 # --------------------------------------------------------------- análise de cortes
-def detectar(src, tem_audio, limiar_cena=0.30, silencio_db=-35, silencio_min=0.4):
+def detectar(src, tem_audio, limiar_cena=0.30, silencio_db=-35, silencio_min=0.4, duracao=None):
     """Uma passada do ffmpeg: trocas de cena (vídeo reduzido a 5 fps) e pausas no áudio."""
     cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src), "-map", "0:v:0",
            "-vf", f"fps=5,scale=320:-2,select='gt(scene,{limiar_cena})',showinfo"]
     if tem_audio:
         cmd += ["-map", "0:a:0", "-af", f"silencedetect=n={silencio_db}dB:d={silencio_min}"]
     cmd += ["-f", "null", "-"]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        raise Erro("'ffmpeg' não encontrado. Instale o ffmpeg e coloque no PATH.")
+    r = executar(cmd, timeout=prazo_midia(duracao) if duracao else 3600)
     if r.returncode != 0:
         raise Erro("Falha ao analisar o vídeo: " + " | ".join(r.stderr.strip().splitlines()[-3:]))
     cenas = [float(x) for x in re.findall(r"Parsed_showinfo.*?pts_time:\s*([\d.]+)", r.stderr)]
@@ -220,6 +269,26 @@ def ass_doc(eventos, fonte, maiuscula):
     return head + "\n".join(linhas) + "\n"
 
 
+_fontes = {}
+
+
+def verificar_fonte(fonte):
+    """None se a fonte está instalada; senão, o nome da que o libass usa no lugar (ele troca em silêncio)."""
+    if fonte in _fontes:
+        return _fontes[fonte]
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "f.ass").write_text(ass_doc([(0, 1, "Teste")], fonte, False), encoding="utf-8")
+        r = executar(["ffmpeg", "-hide_banner", "-loglevel", "verbose", "-f", "lavfi", "-i",
+                      "color=s=320x240:d=0.1", "-vf", "ass=f.ass", "-frames:v", "1", "-f", "null", "-"],
+                     cwd=d, timeout=60)
+    m = re.search(r"fontselect: \((.+?), \d+, \d+\) -> ([^,]+),", r.stderr)
+    escolhida = m.group(2).strip() if m else None
+    # Sem a linha de log não dá para saber: não avisa à toa.
+    troca = escolhida if escolhida and _norm(fonte) not in _norm(escolhida) else None
+    _fontes[fonte] = troca
+    return troca
+
+
 def build_ass(texto, dur_fala, fonte, maiuscula, tempos=None):
     return ass_doc(grupos(texto, dur_fala, tempos), fonte, maiuscula)
 
@@ -262,10 +331,23 @@ MODELO_WHISPER = "small"
 _modelo, _lock_modelo = None, threading.Lock()
 
 
+def precisa_contorno_openmp():
+    """Só em ambiente conda (Anaconda/Miniconda): o numpy com MKL e o ctranslate2 carregam cada um
+    a sua libiomp5md.dll e o processo aborta. A Intel chama o contorno de "não suportado", por isso
+    ele NÃO vale no .venv dos scripts de início (numpy do PyPI usa OpenBLAS e o conflito não existe:
+    testado no Windows 10 em 2026-10-11)."""
+    if (Path(sys.prefix) / "conda-meta").exists():
+        os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+        return True
+    return False
+
+
 def transcrever(src, trechos=((0.0, None),)):
-    """Transcreve a fala (PT-BR) dos trechos, emendados na ordem: (texto, [(ini_s, fim_s, palavra)])."""
-    # Anaconda: numpy (MKL) e ctranslate2 trazem cada um sua cópia do OpenMP e o processo aborta sem isto.
-    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+    """Transcreve a fala (PT-BR) dos trechos, emendados na ordem: (texto, [(ini_s, fim_s, palavra)]).
+
+    Os tempos ficam na linha do tempo do vídeo final (`linha_do_tempo`), não na soma nominal.
+    """
+    precisa_contorno_openmp()
     try:
         from faster_whisper import WhisperModel
         import numpy as np
@@ -280,20 +362,27 @@ def transcrever(src, trechos=((0.0, None),)):
             raise Erro(f"Não consegui carregar o modelo de transcrição ({type(e).__name__}). Na 1a vez "
                        "ele é baixado da internet (~480 MB).")
         # Um trecho por vez: emendados, o Whisper chega a pular fala repetida entre cortes.
-        tempos, offset = [], 0.0
-        for ini, fim in trechos:
+        tempos = []
+        cortados = [t for t in trechos if t[1] is not None]
+        inicios = linha_do_tempo(cortados) if len(cortados) == len(trechos) else None
+        offset = 0.0
+        for k, (ini, fim) in enumerate(trechos):
+            if inicios is not None:
+                offset = inicios[k]
             cmd = ["ffmpeg", "-loglevel", "error", "-ss", f"{ini:.3f}"]
             cmd += ["-to", f"{fim:.3f}"] if fim is not None else []
             cmd += ["-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"]
-            r = subprocess.run(cmd, capture_output=True)  # decodifica com o ffmpeg; evita o módulo `av`
+            prazo = prazo_midia(fim - ini) if fim is not None else 3600
+            r = executar(cmd, timeout=prazo, texto=False)  # decodifica com o ffmpeg; evita o módulo `av`
             if r.returncode != 0:
                 raise Erro("Não consegui ler o áudio para transcrever.")
             audio = np.frombuffer(r.stdout, np.float32)
             if audio.size >= 16000 * 0.3:
                 segs, _ = _modelo.transcribe(audio, language="pt", word_timestamps=True, vad_filter=True)
-                tempos += [(round(offset + float(w.start), 2), round(offset + float(w.end), 2), w.word.strip())
+                tempos += [(round(offset + float(w.start), 3), round(offset + float(w.end), 3), w.word.strip())
                            for s in segs for w in (s.words or []) if w.word.strip()]
-            offset += (fim - ini) if fim is not None else audio.size / 16000
+            if inicios is None:
+                offset += audio.size / 16000
     return " ".join(w for _, _, w in tempos), tempos
 
 
@@ -306,16 +395,137 @@ def ler_tempos(v):
     return t if all(x[0] <= x[1] for x in t) else []
 
 
+def quadros(t):
+    """Segundos -> número inteiro de quadros (grade de 1/FPS)."""
+    return int(round(t * FPS))
+
+
 def ler_cortes(lista, duracao):
+    """Cortes válidos, alinhados à grade de quadros: a mesma base de tempo no render e na transcrição."""
+    ultimo = math.floor(duracao * FPS + 1e-6)
     cortes = []
     for c in lista or []:
-        ini = num(c.get("ini"), 0, duracao, 0)
-        fim = num(c.get("fim"), 0, duracao, 0)
-        if fim - ini >= 0.3:
-            cortes.append((ini, fim))
+        if not isinstance(c, dict):
+            continue
+        a = quadros(num(c.get("ini"), 0, duracao, 0))
+        b = min(quadros(num(c.get("fim"), 0, duracao, 0)), ultimo)
+        if (b - a) / FPS >= 0.3:
+            cortes.append((a / FPS, b / FPS))
     if not cortes:
         raise Erro("Adicione pelo menos um corte (fim maior que o início).")
     return cortes
+
+
+def linha_do_tempo(cortes):
+    """Início de cada corte no vídeo final (s). Cada clipe tem exatamente round(dur*FPS) quadros."""
+    inicios, n = [], 0
+    for a, b in cortes:
+        inicios.append(n / FPS)
+        n += quadros(b - a)
+    return inicios
+
+
+def chave_transcricao(video_id=None, cortes=None, audio_id=None):
+    """Identifica de onde veio uma transcrição; se mudar, o tempo das palavras ficou velho."""
+    if audio_id:
+        return f"a:{audio_id}"
+    return f"v:{video_id}:" + ";".join(f"{quadros(a)}-{quadros(b)}" for a, b in cortes)
+
+
+NOME_SAIDA = re.compile(r"[a-z0-9-]{1,40}_\d{8}-\d{6}(?:_[a-f0-9]{6})?\.mp4")
+
+
+_em_uso = collections.Counter()  # ids de uploads usados por trabalhos em andamento neste processo
+_lock_uso = threading.Lock()
+
+
+@contextlib.contextmanager
+def em_uso(*ids):
+    ids = [i for i in ids if i]
+    with _lock_uso:
+        _em_uso.update(ids)
+    try:
+        yield
+    finally:
+        with _lock_uso:
+            _em_uso.subtract(ids)
+            for i in [k for k, v in _em_uso.items() if v <= 0]:
+                del _em_uso[i]
+
+
+@contextlib.contextmanager
+def pasta_de_trabalho(prefixo=""):
+    """Pasta em tmp/ marcada com o PID do dono (.ativo): a limpeza não mexe nela enquanto ele vive."""
+    work = TMP / f"{prefixo}{uuid.uuid4().hex[:10]}"
+    work.mkdir()
+    (work / ".ativo").write_text(str(os.getpid()), encoding="ascii")
+    try:
+        yield work
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def processo_vivo(pid):
+    if os.name == "nt":  # os.kill no Windows MATA o processo: consulta pela API em vez disso
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        codigo = ctypes.c_ulong()
+        k32.GetExitCodeProcess(h, ctypes.byref(codigo))
+        k32.CloseHandle(h)
+        return codigo.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _tamanho(p):
+    if p.is_file():
+        return p.stat().st_size
+    return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+
+
+def _pasta_ativa(p):
+    try:
+        return p.is_dir() and processo_vivo((p / ".ativo").read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return False
+
+
+def itens_limpeza(alvo, manter=()):
+    """(removíveis, preservados) de uploads/ ou tmp/. Nunca olha saida/."""
+    manter = set(manter) | set(_em_uso)
+    pasta = UP if alvo == "uploads" else TMP
+    rem, pres = [], []
+    for p in pasta.iterdir():
+        if p.name == ".keep":
+            continue
+        guardar = (p.stem in manter) if alvo == "uploads" else _pasta_ativa(p)
+        (pres if guardar else rem).append(p)
+    return rem, pres
+
+
+def nome_saida(nome):
+    """Nome único em saida/: slug + data-hora + sufixo aleatório (renders simultâneos não colidem)."""
+    base = f"{slug(nome)}_{time.strftime('%Y%m%d-%H%M%S')}"
+    while True:
+        n = f"{base}_{uuid.uuid4().hex[:6]}"
+        if not (OUT / f"{n}.mp4").exists() and not (OUT / f"{n}.json").exists():
+            return n
+
+
+def salvar_par(mp4_tmp, registro):
+    """Move o vídeo para saida/ e grava o .json com o mesmo nome."""
+    destino = OUT / mp4_tmp.name
+    shutil.move(str(mp4_tmp), destino)
+    destino.with_suffix(".json").write_text(json.dumps(registro, ensure_ascii=False, indent=2), encoding="utf-8")
+    return destino
 
 
 # --------------------------------------------------------------- render
@@ -336,64 +546,105 @@ def renderizar(job):
     vol_orig = num(job.get("volume_original"), 0, 1, 0.12 if narrando else 1.0)
     vol_musica = num(job.get("volume_musica"), 0, 1, 0.10)
     fonte = (job.get("fonte") or "Arial").replace(",", " ")[:40]
+    avisos = []
 
-    work = TMP / uuid.uuid4().hex[:10]
-    work.mkdir()
-    try:
+    with em_uso(job.get("video_id"), job.get("audio_id"), job.get("musica_id")), pasta_de_trabalho() as work:
+        # Cada clipe: exatamente n quadros e n*SR/FPS amostras (PCM, sem atraso de AAC),
+        # começando em 0. Assim a emenda não acumula deriva nem desalinha áudio e vídeo.
         clips = []
         for i, (ini, fim) in enumerate(cortes):
-            clip = work / f"c{i:02d}.mp4"
-            vf = (f"crop=w='min(iw,ih*9/16)':h=ih:x='(iw-ow)*{cx:.4f}':y=0,"
-                  f"scale={W}:{H}:flags=lanczos,setsar=1,fps={FPS},format=yuv420p")
-            cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{ini:.3f}", "-to", f"{fim:.3f}", "-i", str(src)]
+            n = quadros(fim - ini)
+            dur = n / FPS
+            # Busca meio quadro antes: o quadro exato de `ini` não pode cair antes do ponto de busca
+            # por arredondamento. O áudio descarta esse meio quadro e começa na amostra de `ini`.
+            folga = min(ini, 0.5 / FPS)
+            clip = work / f"c{i:02d}.mkv"
+            cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{ini - folga:.6f}", "-t", f"{dur + 0.5:.4f}",
+                   "-i", str(src)]
             if not info["tem_audio"]:
-                cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
-            cmd += ["-vf", vf, "-map", "0:v:0"]
-            cmd += ["-map", "0:a:0"] if info["tem_audio"] else ["-map", "1:a:0", "-shortest"]
-            cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                    "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2", str(clip)]
-            run(cmd)
+                cmd += ["-f", "lavfi", "-t", f"{dur + 0.5:.4f}", "-i", f"anullsrc=r={SR}:cl=stereo"]
+            fa = "0:a:0" if info["tem_audio"] else "1:a:0"
+            corta_a = round(folga * SR) if info["tem_audio"] else 0
+            fc = (f"[0:v:0]setpts=PTS-STARTPTS,crop=w='min(iw,ih*9/16)':h=ih:x='(iw-ow)*{cx:.4f}':y=0,"
+                  f"scale={W}:{H}:flags=lanczos,setsar=1,fps={FPS},tpad=stop_mode=clone:stop_duration=1,"
+                  f"trim=end_frame={n},format=yuv420p[v];"
+                  f"[{fa}]aresample={SR},asetpts=PTS-STARTPTS,atrim=start_sample={corta_a},asetpts=PTS-STARTPTS,"
+                  f"apad,atrim=end_sample={round(dur * SR)}[a]")
+            cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                    "-c:a", "pcm_s16le", "-ar", str(SR), "-ac", "2", str(clip)]
+            run(cmd, timeout=prazo_midia(dur))
             clips.append(clip)
 
         (work / "lista.txt").write_text("".join(f"file '{c.name}'\n" for c in clips), encoding="utf-8")
         run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", "lista.txt",
-             "-c", "copy", "base.mp4"], cwd=work)
-        d_video = probe(work / "base.mp4")["duracao"]
+             "-c", "copy", "base.mkv"], cwd=work, timeout=prazo_midia(len(cortes)))
+        d_video = sum(quadros(b - a) for a, b in cortes) / FPS
 
         narr, d_narr = None, 0.0
-        tempos = ler_tempos(job.get("tempos"))  # da transcrição (fala do vídeo ou do áudio enviado)
+        tempos, sync = [], None
+        quer_legenda = bool(job.get("legenda")) and bool(texto)
+        tempos_cli = ler_tempos(job.get("tempos"))
         if modo == "ia":
             narr = work / "narracao.mp3"
             tempos = gerar_voz(texto, job.get("voz") or "pt-BR-AntonioNeural", job.get("taxa") or "-5%", narr)
         elif modo == "arquivo":
             narr = achar(job.get("audio_id"))
+            chave = chave_transcricao(audio_id=job.get("audio_id"))
+        else:
+            chave = chave_transcricao(job.get("video_id"), cortes)
         if narr:
             d_narr = probe(narr)["duracao"]
 
-        total = max(d_video, d_narr + 0.4) if narr else d_video
-        extra = max(0.0, total - d_video)
-
-        musica = achar(job["musica_id"]) if job.get("musica_id") else None
-
-        # Sem narração, a legenda acompanha a fala do próprio vídeo (precisa da transcrição).
-        legenda = bool(job.get("legenda")) and bool(texto) and bool(narr or tempos)
+        if quer_legenda and modo != "ia":
+            if tempos_cli and job.get("tempos_chave") == chave:
+                tempos = tempos_cli
+            else:
+                motivo = ("a transcrição era de outro corte ou áudio" if tempos_cli
+                          else "o texto não foi transcrito")
+                try:  # refaz a transcrição da fonte atual e casa com o texto (que pode ter sido editado)
+                    trechos = [(0.0, None)] if modo == "arquivo" else cortes
+                    _, tempos = transcrever(narr if modo == "arquivo" else src, trechos)
+                    if not tempos:
+                        raise Erro("não encontrei fala")
+                    sync = "por_palavra_retranscrita"
+                    avisos.append(f"Legenda sincronizada de novo ({motivo}). Confira se o texto ainda "
+                                  "corresponde à fala.")
+                except Erro as e:
+                    tempos = []
+                    detalhe = f"{motivo}; não deu para transcrever agora: {e}"
+                    if modo == "arquivo":
+                        avisos.append(f"Legenda proporcional ao texto, sem tempo por palavra ({detalhe}).")
+                    else:
+                        avisos.append(f"Legenda NÃO gerada ({detalhe}). Clique em 'Transcrever fala' "
+                                      "e renderize de novo.")
+        legenda = quer_legenda and bool(narr or tempos)
+        if legenda and (troca := verificar_fonte(fonte)):
+            avisos.append(f"A fonte '{fonte}' não está instalada; a legenda saiu com '{troca}'.")
         if legenda:
+            sync = sync or ("por_palavra" if tempos else "proporcional")
             (work / "legenda.ass").write_text(
                 build_ass(texto, d_narr if narr else d_video, fonte, bool(job.get("maiuscula", True)), tempos),
                 encoding="utf-8")
+        elif bool(job.get("legenda")) and not texto and modo != "ia":
+            avisos.append("Legenda marcada, mas o texto está vazio: o vídeo saiu sem legenda.")
 
-        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "base.mp4"]
+        total = max(d_video, d_narr + 0.4) if narr else d_video
+        extra = max(0.0, total - d_video)
+        musica = achar(job["musica_id"]) if job.get("musica_id") else None
+
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "base.mkv"]
         idx = 1
         labels = ["[a0]"]
         fc_a = [f"[0:a]volume={vol_orig:.3f},apad[a0]"]
         if narr:
             cmd += ["-i", str(narr)]
-            fc_a.append(f"[{idx}:a]aresample=44100,apad[a{idx}]")
+            fc_a.append(f"[{idx}:a]aresample={SR},apad[a{idx}]")
             labels.append(f"[a{idx}]")
             idx += 1
         if musica:
             cmd += ["-stream_loop", "-1", "-i", str(musica)]
-            fc_a.append(f"[{idx}:a]aresample=44100,volume={vol_musica:.3f}[a{idx}]")
+            fc_a.append(f"[{idx}:a]aresample={SR},volume={vol_musica:.3f}[a{idx}]")
             labels.append(f"[a{idx}]")
             idx += 1
         n = len(labels)
@@ -406,43 +657,84 @@ def renderizar(job):
             vchain.append("ass=legenda.ass")
         fc_v = "[0:v]" + (",".join(vchain) if vchain else "null") + "[vout]"
 
-        nome = f"{slug(job.get('nome'))}_{time.strftime('%Y%m%d-%H%M%S')}"
+        nome = nome_saida(job.get("nome"))
         final = work / f"{nome}.mp4"
         cmd += ["-filter_complex", ";".join([fc_v] + fc_a), "-map", "[vout]", "-map", "[aout]",
                 "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                 "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", final.name]
-        run(cmd, cwd=work)
+        run(cmd, cwd=work, timeout=prazo_midia(total))
 
-        shutil.move(str(final), OUT / final.name)
-        dur_final = probe(OUT / final.name)["duracao"]
+        dur_final = probe(final)["duracao"]
+        if dur_final < MIN_ELEGIVEL:
+            avisos.insert(0, f"{dur_final:.0f}s: abaixo de 1 minuto, não conta para o Creator Rewards "
+                             "[DADO, fonte secundária].")
         registro = {
             "arquivo": final.name, "criado_em": time.strftime("%Y-%m-%d %H:%M:%S"),
             "origem_declarada": origem, "prova_declarada": prova,
             "video_fonte": job.get("nome_original"), "cortes": cortes,
-            "narracao": modo,
-            "legenda_sync": ("por_palavra" if tempos else "proporcional") if legenda else None,
-            "duracao_s": round(dur_final, 2),
+            "narracao": modo, "legenda_sync": sync if legenda else None,
+            "duracao_s": round(dur_final, 2), "avisos": avisos,
             "aviso": "Origem opcional, autodeclarada pelo usuário. O app não verifica status legal.",
         }
-        (OUT / f"{nome}.json").write_text(json.dumps(registro, ensure_ascii=False, indent=2), encoding="utf-8")
-        aviso = ""
-        if dur_final < MIN_ELEGIVEL:
-            aviso = (f"{dur_final:.0f}s: abaixo de 1 minuto, não conta para o Creator Rewards "
-                     "[DADO, fonte secundária].")
-        return {"arquivo": final.name, "duracao": dur_final, "aviso": aviso}
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+        salvar_par(final, registro)
+        return {"arquivo": final.name, "duracao": dur_final, "aviso": " ".join(avisos), "avisos": avisos,
+                "legenda_sync": registro["legenda_sync"]}
 
 
 # --------------------------------------------------------------- rotas
+HOSTS_LOCAIS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _host_local(valor):
+    try:
+        return (urlparse("//" + (valor or "")).hostname or "") in HOSTS_LOCAIS
+    except ValueError:
+        return False
+
+
+@app.before_request
+def so_o_navegador_local():
+    """O app escuta só em 127.0.0.1, mas qualquer site aberto no navegador consegue mandar
+    requisições para lá. Recusa Host estranho (DNS rebinding) e POST vindo de outro site."""
+    if not _host_local(request.host):
+        raise Erro("Acesso recusado: o Corte Studio só atende em 127.0.0.1 ou localhost.", 403)
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origem = request.headers.get("Origin")
+        de_fora = request.headers.get("Sec-Fetch-Site") == "cross-site"
+        if de_fora or (origem is not None and not _host_local(urlparse(origem).netloc)):
+            raise Erro("Requisição de outro site recusada.", 403)
+
+
+def corpo_json():
+    if not request.is_json:
+        raise Erro("Envie os dados como JSON (Content-Type: application/json).", 415)
+    j = request.get_json(silent=True)
+    if not isinstance(j, dict):
+        raise Erro("JSON inválido.")
+    return j
+
+
 @app.errorhandler(Erro)
 def erro(e):
-    return jsonify({"erro": str(e)}), 400
+    return jsonify({"erro": str(e)}), getattr(e, "status", 400)
+
+
+@app.errorhandler(HTTPException)
+def erro_http(e):
+    msg = {404: "Não encontrado.", 413: "Arquivo grande demais (limite de 8 GB).",
+           405: "Método não permitido."}.get(e.code, e.description)
+    return jsonify({"erro": msg}), e.code
+
+
+@app.errorhandler(Exception)
+def erro_inesperado(e):
+    app.logger.exception("Erro inesperado")
+    return jsonify({"erro": f"Erro interno ({type(e).__name__}): {e}. Detalhes no terminal do app."}), 500
 
 
 @app.get("/")
 def index():
-    return send_file(ROOT / "index.html")
+    return send_file(RECURSOS / "index.html")
 
 
 @app.post("/upload")
@@ -455,12 +747,15 @@ def upload():
         raise Erro(f"Formato {ext or '(sem extensão)'} não suportado.")
     fid = uuid.uuid4().hex[:12]
     dest = UP / f"{fid}{ext}"
-    f.save(dest)
     try:
+        f.save(dest)
         info = probe(dest)
-    except Erro:
+    except Erro as e:
         dest.unlink(missing_ok=True)
-        raise Erro("Não consegui ler esse arquivo de mídia.")
+        raise Erro(f"Não consegui ler esse arquivo de mídia. {e}")
+    except BaseException:
+        dest.unlink(missing_ok=True)  # nada de arquivo pela metade em uploads/
+        raise
     return jsonify({"id": fid, "nome": f.filename, **info})
 
 
@@ -474,47 +769,126 @@ def media(fid):
 
 @app.post("/render")
 def render():
-    return jsonify(renderizar(request.get_json(force=True, silent=True) or {}))
+    return jsonify(renderizar(corpo_json()))
 
 
 @app.post("/transcrever")
 def rota_transcrever():
-    job = request.get_json(force=True, silent=True) or {}
+    job = corpo_json()
     t0 = time.time()
     if job.get("audio_id"):  # narração enviada
-        texto, tempos = transcrever(achar(job["audio_id"]))
+        with em_uso(job["audio_id"]):
+            texto, tempos = transcrever(achar(job["audio_id"]))
+        chave = chave_transcricao(audio_id=job["audio_id"])
     else:  # fala original do vídeo, só nos cortes, na ordem da lista
         src = achar(job.get("video_id"))
         info = probe(src)
         if not info["tem_audio"]:
             raise Erro("Esse vídeo não tem áudio para transcrever.")
-        texto, tempos = transcrever(src, ler_cortes(job.get("cortes"), info["duracao"]))
+        cortes = ler_cortes(job.get("cortes"), info["duracao"])
+        with em_uso(job.get("video_id")):
+            texto, tempos = transcrever(src, cortes)
+        chave = chave_transcricao(job.get("video_id"), cortes)
     if not tempos:
         raise Erro("Não encontrei fala nesse trecho.")
-    return jsonify({"texto": texto, "tempos": tempos, "segundos": round(time.time() - t0, 1)})
+    # `chave` volta no /render como `tempos_chave`: se não bater, a transcrição está velha.
+    return jsonify({"texto": texto, "tempos": tempos, "chave": chave, "segundos": round(time.time() - t0, 1)})
 
 
 @app.post("/analisar")
 def analisar():
-    job = request.get_json(force=True, silent=True) or {}
+    job = corpo_json()
     src = achar(job.get("video_id"))
     info = probe(src)
     dmin = num(job.get("min"), 1, 600, 15)
     dmax = num(job.get("max"), dmin, 600, max(dmin, 60))
     t0 = time.time()
-    cenas, pausas = detectar(src, info["tem_audio"])
+    with em_uso(job.get("video_id")):
+        cenas, pausas = detectar(src, info["tem_audio"], duracao=info["duracao"])
     return jsonify({"sugestoes": sugerir(info["duracao"], cenas, pausas, dmin, dmax),
                     "cenas": len(cenas), "pausas": len(pausas), "segundos": round(time.time() - t0, 1)})
 
 
+def _ler_manter(lista):
+    return [i for i in (lista or []) if isinstance(i, str) and re.fullmatch(r"[a-f0-9]{12}", i)]
+
+
+def _resumo(itens):
+    return {"arquivos": len(itens), "mb": round(sum(_tamanho(p) for p in itens) / 1e6, 1)}
+
+
+@app.get("/limpeza")
+def ver_limpeza():
+    manter = _ler_manter((request.args.get("manter") or "").split(","))
+    out = {}
+    for alvo in ("uploads", "tmp"):
+        rem, pres = itens_limpeza(alvo, manter)
+        out[alvo] = {"removiveis": _resumo(rem), "preservados": _resumo(pres)}
+    return jsonify(out)
+
+
+@app.post("/limpeza")
+def limpar():
+    """Só quando o usuário pede. Apaga cópias enviadas (uploads/) ou restos de trabalho (tmp/);
+    preserva o que está aberto na tela (`manter`) ou em uso. Nunca toca em saida/."""
+    job = corpo_json()
+    alvo = job.get("alvo")
+    if alvo not in ("uploads", "tmp"):
+        raise Erro("alvo precisa ser 'uploads' ou 'tmp'.")
+    rem, pres = itens_limpeza(alvo, _ler_manter(job.get("manter")))
+    feito, falhas = [], []
+    for p in rem:
+        try:
+            tam = _tamanho(p)
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+            feito.append(tam)
+        except OSError:
+            falhas.append(p.name)  # ex.: arquivo aberto em outro programa no Windows
+    return jsonify({"removidos": len(feito), "mb": round(sum(feito) / 1e6, 1),
+                    "preservados": len(pres), "falhas": falhas})
+
+
 @app.get("/saida/<nome>")
 def baixar(nome):
-    p = OUT / Path(nome).name
-    if not p.exists() or p.suffix != ".mp4":
+    # Só nomes no formato que o app gera: bloqueia CON/AUX/NUL e afins (travam no Windows) e ../
+    if not NOME_SAIDA.fullmatch(nome) or not (OUT / nome).is_file():
         abort(404)
-    return send_file(p, conditional=True, as_attachment=request.args.get("dl") == "1")
+    return send_file(OUT / nome, conditional=True, as_attachment=request.args.get("dl") == "1")
+
+
+# Editor assistido e referências (módulos separados, mesmo servidor).
+import editor  # noqa: E402
+import referencias  # noqa: E402,F401  (biblioteca: cliente Gemini e credenciais; sem rotas)
+import sugestoes  # noqa: E402
+import conteudo  # noqa: E402
+
+app.register_blueprint(editor.bp)
+app.register_blueprint(sugestoes.bp)
+app.register_blueprint(conteudo.bp)
 
 
 if __name__ == "__main__":
+    import socket
+    import webbrowser
+    with socket.socket() as s:
+        if s.connect_ex(("127.0.0.1", 5000)) == 0:
+            if CONGELADO:   # abriu o .exe de novo: o app já está rodando, só abre o navegador
+                print("O Corte Studio já está aberto: abrindo o navegador.")
+                if not os.environ.get("CORTE_SEM_NAVEGADOR"):
+                    webbrowser.open("http://127.0.0.1:5000/editor")
+                sys.exit(0)
+            print("[ERRO] A porta 5000 já está em uso: o Corte Studio provavelmente já está aberto em outra janela.\n"
+                  "       Use http://127.0.0.1:5000 ou feche a outra janela e abra de novo.")
+            sys.exit(1)
+    if CONGELADO:
+        if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+            print("[ERRO] ffmpeg/ffprobe não encontrados (a pasta 'ffmpeg' ao lado do .exe sumiu?).")
+            input("Enter para fechar.")
+            sys.exit(1)
+        if not os.environ.get("CORTE_SEM_NAVEGADOR"):   # testes automáticos não abrem abas
+            threading.Timer(1.5, lambda: webbrowser.open("http://127.0.0.1:5000/editor")).start()
+        print("Corte Studio aberto no navegador. Para sair, feche esta janela.")
+    if precisa_contorno_openmp():
+        print("[AVISO] Rodando no Python do Anaconda: contorno de OpenMP ligado. Prefira iniciar.bat/.sh (.venv).")
     print("Corte Studio em http://127.0.0.1:5000  (Ctrl+C para sair)")
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

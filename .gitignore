@@ -27,3 +27,13 @@ venv/
 Thumbs.db
 desktop.ini
 .DS_Store
+edicoes/
+cache/
+
+# credenciais locais (nunca versionar)
+config_local.env
+referencias/
+
+# executável gerado (construir_exe.bat)
+build/
+dist/

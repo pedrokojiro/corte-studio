@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corte Studio · Editor</title>
+<style>
+  /* Paleta escura discreta, um único acento (--acc). ok/warn/bad e as tags são só para estado e origem. */
+  :root{
+    --bg:#0e1014;--card:#15181e;--card2:#1b1f27;--line:#262b35;--line2:#363c48;
+    --txt:#e9ebf0;--mut:#9ba2b0;--acc:#f0784f;--acc-txt:#1b0e08;
+    --ok:#4cc38a;--warn:#e6b450;--bad:#f07070;--sel:#3a74e0;
+    --r:12px;--r-sm:8px;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:var(--acc)}
+  :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .pular{position:absolute;left:-9999px;top:8px;z-index:10;background:var(--card2);color:var(--txt);padding:8px 12px;border-radius:var(--r-sm)}
+  .pular:focus{left:16px}
+
+  .topo{position:sticky;top:0;z-index:5;background:rgba(14,16,20,.94);border-bottom:1px solid var(--line);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  .topo-in{max-width:1500px;margin:0 auto;padding:12px 24px;display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap}
+  .topo h1{font-size:16px;font-weight:650;margin:0;letter-spacing:-.01em;white-space:nowrap}
+  .topo h1 span{color:var(--mut);font-weight:400}
+  .grupo{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #pNome{width:200px}
+  #estadoSalvo{font-size:12.5px}
+  .sp{flex:1}
+  .link-simples{font-size:13px;color:var(--mut);text-decoration:none;border-bottom:1px solid var(--line2)}
+  .link-simples:hover{color:var(--txt)}
+  .faixa-msg{max-width:1500px;margin:0 auto;padding:0 24px}
+
+  main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(360px,1fr);gap:24px;padding:20px 24px 32px;max-width:1500px;margin:0 auto;align-items:start}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:20px}
+  .card h2{font-size:15px;font-weight:600;margin:0 0 14px;color:var(--txt)}
+  .card h2.sub{font-size:13px;margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
+  .intro{margin-bottom:6px}
+
+  label{display:block;color:var(--mut);font-size:12.5px;margin:12px 0 6px}
+  label.chk{display:flex;gap:8px;align-items:center;color:var(--txt);font-size:14px;margin:12px 0;cursor:pointer}
+  label.inline{margin:0}
+  input[type=text],input[type=number],input[type=url],input[type=date],select,textarea{background:var(--bg);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:7px 10px;font:inherit;transition:border-color .15s}
+  input[type=text]:hover,input[type=number]:hover,input[type=url]:hover,select:hover,textarea:hover{border-color:#4a5162}
+  input[type=text]:focus,input[type=number]:focus,input[type=url]:focus,input[type=date]:focus,select:focus,textarea:focus{border-color:var(--acc)}
+  input[type=number]{width:84px}
+  input[type=range]{width:100%;accent-color:var(--acc);margin:4px 0}
+  input[type=checkbox]{accent-color:var(--acc);width:16px;height:16px;margin:0}
+  input[type=color]{width:40px;height:34px;padding:3px;background:var(--bg);border:1px solid var(--line2);border-radius:var(--r-sm);cursor:pointer}
+  input[type=file]{max-width:100%;color:var(--mut);font:inherit;font-size:13px}
+  input[type=file]::file-selector-button{background:var(--card2);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:7px 14px;margin-right:12px;font:inherit;cursor:pointer}
+  input[type=file]::file-selector-button:hover{border-color:#4a5162}
+  .w140{width:140px}
+
+  button{background:var(--card2);color:var(--txt);border:1px solid var(--line2);border-radius:var(--r-sm);padding:7px 14px;font:inherit;cursor:pointer;transition:background .15s,border-color .15s}
+  button:hover{background:#232835;border-color:#4a5162}
+  button:disabled,button:disabled:hover{opacity:.45;cursor:not-allowed;background:var(--card2);border-color:var(--line2)}
+  button.pri{background:var(--acc);border-color:var(--acc);color:var(--acc-txt);font-weight:600}
+  button.pri:hover{background:#f48a66;border-color:#f48a66}
+  button.pri:disabled,button.pri:disabled:hover{background:var(--acc);border-color:var(--acc)}
+  button.mini{padding:3px 9px;font-size:12px;border-radius:6px}
+
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .esp{margin-top:12px} .dica{margin-top:10px}
+  .mut{color:var(--mut);font-size:12.5px} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+
+  .stage{position:relative;background:#000;border-radius:10px;overflow:hidden;margin-top:14px}
+  .stage video{display:block;width:100%;max-height:52vh}
+  .crop{position:absolute;top:0;bottom:0;border:2px solid var(--acc);pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.5)}
+  #cursor{font-variant-numeric:tabular-nums;color:var(--txt)}
+
+  .tl{display:flex;height:40px;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;background:#0a0c10}
+  .tl div{border-right:1px solid #0a0c10;cursor:pointer;font-size:11px;font-weight:600;color:#fff;padding:4px 6px;overflow:hidden;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+  .tl div.sel{outline:2px solid #fff;outline-offset:-2px}
+
+  .tabela,#comparacao{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th{font-weight:500;color:var(--mut);font-size:12px}
+  td,th{padding:7px 5px;border-bottom:1px solid var(--line);text-align:left;font-size:12.5px;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:0}
+  tr.sel td{background:rgba(240,120,79,.08)}
+
+  .tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:16px}
+  .tabs button{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;margin-bottom:-1px;padding:10px 12px;color:var(--mut)}
+  .tabs button:hover{background:none;color:var(--txt)}
+  .tabs button.on{color:var(--txt);border-bottom-color:var(--acc);font-weight:600}
+  .tab{display:none} .tab.on{display:block}
+
+  .presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:10px}
+  .preset{border:2px solid var(--line);border-radius:10px;padding:5px;cursor:pointer;text-align:center;font-size:12px;background:var(--bg);transition:border-color .15s}
+  .preset:hover{border-color:var(--line2)}
+  .preset img{width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:6px;background:#1e2128;display:block;margin-bottom:4px}
+  .preset.on{border-color:var(--acc)}
+  details{margin-top:14px}
+  summary{cursor:pointer;color:var(--mut);padding:4px 0}
+  summary:hover{color:var(--txt)}
+  .ajuste{border:1px solid var(--line);border-radius:var(--r-sm);padding:4px 14px 14px}
+  .ajuste[open] summary{color:var(--txt);margin-bottom:4px}
+
+  .frases{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
+  .frase{display:grid;grid-template-columns:66px 1fr auto;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .frase:last-child{border-bottom:0}
+  .frase input{width:100%}
+
+  .tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;background:#262b35;color:var(--mut)}
+  .tag.ia{background:#33284a;color:#d8c2ff} .tag.loc{background:#20342b;color:#9fe0bf} .tag.fala{background:#1f3049;color:#a9c8ff}
+  .barra{height:6px;background:#0a0c10;border-radius:99px;overflow:hidden;margin:6px 0}
+  .barra i{display:block;height:100%;background:var(--acc);width:0;transition:width .3s}
+  .sug{border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0;background:var(--card2)}
+  .sug.aplicada{border-color:var(--ok)} .sug.rejeitada{opacity:.5}
+  .legal{border:1px solid rgba(230,180,80,.28);background:rgba(230,180,80,.06);color:#ecd59b;border-radius:var(--r-sm);padding:10px 12px;font-size:12.5px;margin:12px 0}
+  #previaBox video{width:100%;max-height:60vh;background:#000;border-radius:10px}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .cmp video{width:100%;background:#000;border-radius:8px}
+  kbd{background:var(--card2);border:1px solid var(--line2);border-radius:4px;padding:0 5px;font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--txt)}
+  .obs{font-size:12.5px;margin:4px 0} .obs b{color:#a9c8ff}
+  .quadros{display:flex;gap:6px;overflow:auto;margin-top:6px} .quadros figure{margin:0;font-size:11px;color:var(--mut);text-align:center} .quadros img{height:110px;border-radius:6px;display:block}
+
+  /* recorte no player: alças de início/fim sobre a trilha da fonte */
+  .trim{margin-top:12px}
+  .trim-trilho{position:relative;height:34px;border-radius:var(--r-sm);background:#0a0c10;border:1px solid var(--line);cursor:pointer;touch-action:none;user-select:none}
+  .trim-sel{position:absolute;top:0;bottom:0;background:rgba(240,120,79,.22);border-top:2px solid var(--acc);border-bottom:2px solid var(--acc)}
+  .trim-seg{position:absolute;top:6px;bottom:6px;background:rgba(155,162,176,.14);border-radius:3px}
+  .trim-alca{position:absolute;top:-4px;bottom:-4px;width:14px;margin-left:-7px;background:var(--acc);border-radius:4px;cursor:ew-resize;box-shadow:0 0 0 2px var(--bg)}
+  .trim-alca::after{content:"";position:absolute;left:6px;top:10px;bottom:10px;width:2px;background:var(--acc-txt);opacity:.6}
+  .trim-alca:focus-visible{outline:2px solid #fff}
+  .trim-cursor{position:absolute;top:-6px;bottom:-6px;width:2px;margin-left:-1px;background:#fff;pointer-events:none}
+  .trim-escala{display:flex;justify-content:space-between;font-size:11px;color:var(--mut);margin-top:3px;font-variant-numeric:tabular-nums}
+  .trim input[type=number]{width:92px}
+  .ativo{border:1px solid var(--line);background:var(--card);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:12.5px;color:var(--mut)}
+  .ativo b{color:var(--txt);font-weight:600}
+  .frase .tempos{grid-column:2 / 4;font-size:11px;color:var(--mut);margin-top:-4px;font-variant-numeric:tabular-nums}
+  .frase.editada input{border-color:rgba(76,195,138,.5)}
+  .chip{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;border:1px solid var(--line2);color:var(--mut)}
+  .chip.ok{border-color:rgba(76,195,138,.5);color:var(--ok)} .chip.warn{border-color:rgba(230,180,80,.5);color:var(--warn)} .chip.bad{border-color:rgba(240,112,112,.5);color:var(--bad)}
+  .sug .campo{margin:3px 0;font-size:12.5px} .sug .campo b{color:var(--mut);font-weight:500}
+  .sug .acoes{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .cita{border-left:2px solid var(--line2);padding-left:8px;color:var(--txt);font-size:12.5px;margin:4px 0}
+  .efs td input[type=number]{width:70px}
+  /* player: vistas Original / Editado (aproximado) / Renderizado */
+  .vistas{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .seg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r-sm);overflow:hidden}
+  .seg button{border:0;border-radius:0;background:var(--bg);padding:6px 12px}
+  .seg button+button{border-left:1px solid var(--line2)}
+  .seg button.on{background:var(--acc);color:var(--acc-txt);font-weight:600}
+  .seg small{font-weight:400;opacity:.75;font-size:11px}
+  .stage video#vidR{margin:0 auto;max-height:62vh;width:auto;max-width:100%}
+  .stage.editado .crop{box-shadow:0 0 0 9999px rgba(0,0,0,.82);border-color:transparent}
+  .camada{position:absolute;pointer-events:none;overflow:hidden}
+  .camada .ov{position:absolute;left:4%;right:4%;text-align:center;transform:translateY(-50%);line-height:1.15;white-space:normal;word-wrap:break-word}
+  .camada .ov span{paint-order:stroke fill}
+  .camada .caixa{display:inline;padding:.08em .3em;box-decoration-break:clone;-webkit-box-decoration-break:clone;border-radius:.12em}
+  #prevStatus:empty{display:none}
+  .corte .rank{font-size:12px;font-weight:700;color:var(--acc-txt);background:var(--acc);border-radius:6px;padding:1px 7px}
+  .corte .titulo-corte{font-size:15px;line-height:1.35}
+  .corte .ideia{margin:6px 0;color:var(--txt)}
+  .corte input[type=number]{width:76px}
+  .mini-v{width:84px;aspect-ratio:9/16;object-fit:cover;border-radius:6px;background:#1e2128;margin-right:12px;flex:none}
+  textarea{font:inherit;resize:vertical}
+  main>section,main>aside{min-width:0}
+  @media(max-width:1000px){main{grid-template-columns:minmax(0,1fr);gap:0;padding:16px}}
+  @media(max-width:600px){.topo-in,.faixa-msg{padding-left:16px;padding-right:16px}.card{padding:16px;margin-bottom:16px}.cmp{grid-template-columns:1fr}#pNome{width:100%}.grupo{width:100%}.sp{display:none}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<a class="pular" href="#conteudo">Pular para o conteúdo</a>
+<header class="topo">
+  <div class="topo-in">
+    <h1>Corte Studio <span>· Editor</span></h1>
+    <div class="grupo" role="group" aria-label="Projeto">
+      <input type="text" id="pNome" placeholder="Nome do projeto" aria-label="Nome do projeto">
+      <button id="bNovo">Novo</button>
+      <select id="pLista" aria-label="Abrir projeto"><option value="">Abrir projeto…</option></select>
+      <button id="bSalvar" class="pri">Salvar</button>
+      <span id="estadoSalvo" class="mut" aria-live="polite"></span>
+    </div>
+    <span class="sp"></span>
+    <div class="grupo" role="group" aria-label="Histórico e versões">
+      <button id="bDesfazer" title="Ctrl+Z">↶ Desfazer</button>
+      <button id="bRefazer" title="Ctrl+Y">↷ Refazer</button>
+      <label for="versao" class="mut inline">Versão</label>
+      <select id="versao" aria-label="Versão do plano"></select>
+      <button id="bDuplicar" title="Copia a versão atual como alternativa">Duplicar versão</button>
+    </div>
+    <a href="/" class="link-simples">Modo simples</a>
+  </div>
+</header>
+<div id="msg" class="faixa-msg" aria-live="polite"></div>
+<main id="conteudo">
+<section aria-label="Player e linha do tempo">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Player</h2>
+      <div class="row">
+        <input type="file" id="arqFonte" accept="video/*,.mkv" aria-label="Adicionar vídeo-fonte">
+        <select id="fonteVis" aria-label="Fonte no player"></select>
+        <span id="infoFonte" class="mut"></span>
+      </div>
+    </div>
+    <div class="vistas esp" role="group" aria-label="O que o player mostra">
+      <div class="seg" role="radiogroup" aria-label="Vista">
+        <button role="radio" data-vista="original" aria-checked="true" class="on" title="O vídeo-fonte, sem nenhuma edição">Original</button>
+        <button role="radio" data-vista="editado" aria-checked="false" title="A linha do tempo com legenda, texto na tela, volume, música e efeitos desenhados/mixados no navegador (aproximado)">Editado <small>aproximado</small></button>
+        <button role="radio" data-vista="render" aria-checked="false" title="Trecho curto renderizado pelo mesmo motor da exportação">Renderizado <small>trecho</small></button>
+      </div>
+      <button id="bAB" class="mini" title="Alterna Original ↔ Editado no mesmo instante (tecla B)">Antes/depois</button>
+      <span id="prevStatus" class="chip" aria-live="polite"></span>
+    </div>
+    <div class="stage" id="stage">
+      <video id="vid" controls playsinline></video>
+      <video id="vidR" controls playsinline hidden></video>
+      <div class="crop" id="crop" hidden></div>
+      <div class="camada" id="camada" hidden aria-hidden="true"><div id="ovTits"></div><div id="ovLeg"></div></div>
+    </div>
+    <div id="vistaInfo" class="mut dica"></div>
+    <div class="row esp" id="rendCtl" hidden>
+      <button id="bRendTrecho" class="mini">Renderizar este trecho</button>
+      <label class="chk" style="margin:0;font-size:12.5px"><input type="checkbox" id="rendAuto" checked> atualizar sozinho ao editar</label>
+      <span id="rendAlt"></span>
+    </div>
+    <div id="rendProg"></div>
+    <div class="trim" id="trim" hidden>
+      <div class="row" style="justify-content:space-between"><span class="mut" id="trimRot"></span>
+        <label class="chk" style="margin:0;font-size:12.5px"><input type="checkbox" id="trimZoom"> aproximar no corte</label></div>
+      <div class="trim-trilho" id="trimTrilho" aria-label="Recorte do corte ativo: arraste as alças">
+        <div class="trim-sel" id="trimSel"></div>
+        <div class="trim-alca" id="trimA" role="slider" tabindex="0" aria-label="Início do corte ativo (setas: 1 quadro; Shift: 1 s)"></div>
+        <div class="trim-alca" id="trimB" role="slider" tabindex="0" aria-label="Fim do corte ativo (setas: 1 quadro; Shift: 1 s)"></div>
+        <div class="trim-cursor" id="trimCur"></div>
+      </div>
+      <div class="trim-escala"><span id="trimV0"></span><span id="trimV1"></span></div>
+      <div class="row esp">
+        <label for="trimIni" class="mut inline">Início</label><input type="number" id="trimIni" step="0.033" min="0">
+        <button class="mini" id="trimIniCur" title="Atalho: [">⇤ no cursor</button>
+        <label for="trimFim" class="mut inline">Fim</label><input type="number" id="trimFim" step="0.033" min="0">
+        <button class="mini" id="trimFimCur" title="Atalho: ]">no cursor ⇥</button>
+        <span class="mut">Duração <b id="trimDur">–</b></span>
+      </div>
+      <div class="row esp">
+        <button id="trimPlay" title="Atalho: P">▶ Tocar só o corte</button>
+        <label class="chk" style="margin:0"><input type="checkbox" id="trimLoop"> repetir</label>
+        <button id="bDividir" title="S">✂ Dividir no cursor</button>
+        <span class="mut">O vídeo original não é alterado: só o plano muda (Ctrl+Z desfaz).</span>
+      </div>
+    </div>
+    <details class="ajuste" style="margin-top:14px"><summary>Novo corte por marcação (I/O) e atalhos</summary>
+      <div class="row esp">
+        <span class="mut">Cursor na fonte: <b id="cursor">0:00.0</b></span>
+        <button id="bIni" title="I">Marcar início</button><button id="bFim" title="O">Marcar fim</button>
+        <span class="mut" id="marcas"></span>
+        <button id="bAddSeg" class="pri" title="Enter">Adicionar segmento</button>
+      </div>
+      <div class="mut dica">Atalhos: <kbd>I</kbd>/<kbd>O</kbd> marcam, <kbd>Enter</kbd> adiciona, <kbd>S</kbd> divide o corte ativo no cursor, <kbd>Del</kbd> remove, <kbd>[</kbd>/<kbd>]</kbd> recortam o corte ativo no cursor, <kbd>P</kbd> toca só o corte, <kbd>B</kbd> antes/depois, <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd>, <kbd>Ctrl+S</kbd> salva. A mídia de origem nunca é alterada.</div>
+    </details>
+  </div>
+  <div class="card">
+    <h2>Linha do tempo <span class="mut" style="font-weight:400">(ordem de saída)</span></h2>
+    <div class="tl" id="tl" role="list" aria-label="Segmentos na ordem de saída"></div>
+    <div id="tlInfo" class="mut dica"></div>
+    <div class="tabela esp"><table><thead><tr><th>#</th><th>Saída</th><th>Início (fonte)</th><th>Fim (fonte)</th><th>Dur.</th><th></th></tr></thead><tbody id="segs"></tbody></table></div>
+  </div>
+</section>
+
+<aside aria-label="Cortes, legendas, texto na tela, áudio e efeitos, publicação">
+  <div class="ativo" id="corteAtivo" aria-live="polite"></div>
+  <details class="ajuste" style="margin:-4px 0 12px"><summary>Análise de conteúdo: <span id="provResumo"></span></summary>
+    <div class="row">
+      <label for="provedor" class="mut inline">Usar</label>
+      <select id="provedor"><option value="auto">IA quando configurada (Gemini)</option><option value="local">Só heurística local (sem IA)</option></select>
+      <span id="provInfo" class="mut"></span>
+    </div>
+    <label class="chk" style="font-size:12.5px"><input type="checkbox" id="envioQuadros"> Autorizo enviar QUADROS (imagens) do corte ao Google para análise visual</label>
+  </details>
+  <div class="tabs" role="tablist">
+    <button data-tab="tCortes" class="on">Cortes</button>
+    <button data-tab="tLeg">Legendas</button>
+    <button data-tab="tTit">Texto na tela</button>
+    <button data-tab="tEf">Áudio e efeitos</button>
+    <button data-tab="tPub">Publicação</button>
+  </div>
+
+  <div class="card tab on" id="tCortes">
+    <h2>Descobrir cortes pelo conteúdo <span class="mut" style="font-weight:400">(fonte inteira, só quando você pedir)</span></h2>
+    <div class="mut intro">Lê a fala da fonte inteira, acha os assuntos completos e os ordena por potencial editorial (não é previsão de views). Pausas e trocas de cena só ajustam as bordas. Enquanto transcreve, mostra sugestões provisórias. Não cria legenda; a legenda dos cortes reaproveita esta transcrição.</div>
+    <div class="row">
+      <label for="sMin" class="mut inline">Duração entre</label>
+      <input type="number" id="sMin" value="20" min="5" aria-label="duração mínima"> e <input type="number" id="sMax" value="75" min="6" aria-label="duração máxima"> s
+      <button id="bSug" class="pri">Descobrir cortes</button>
+    </div>
+    <div id="sugProg"></div>
+    <div id="sugCortes" class="esp" aria-live="polite"></div>
+    <h2 class="sub">Gancho de abertura</h2>
+    <div class="mut intro">Analisa a fala do escopo escolhido (transcreve só ele, se precisar): afirmações, perguntas, conflitos, revelações e, com quadros autorizados, momentos visuais. Separa fala existente, texto novo na tela e narração nova, e diz se o corte entrega o que o gancho promete.</div>
+    <div class="row esp">
+      <label for="ganEscopo" class="mut inline">Escopo</label>
+      <select id="ganEscopo"><option value="corte">Corte ativo</option><option value="linha">Edição completa (todos os cortes)</option></select>
+      <button id="bGanchos" class="pri">Analisar ganchos</button><span id="ganInfo" class="mut" aria-live="polite"></span></div>
+    <div id="ganProg"></div>
+    <div id="ganchos"></div>
+  </div>
+
+  <div class="card tab" id="tLeg">
+    <h2>Legendas <span class="mut" style="font-weight:400">(fala transcrita, queimada no vídeo)</span></h2>
+    <div class="mut intro">A legenda é a fala de verdade do vídeo. Texto editorial vai em <b>Texto na tela</b>, com outro visual; o texto do post vai em <b>Publicação</b>.</div>
+    <label class="chk"><input type="checkbox" id="legAtiva"> Legenda ativa</label>
+    <div id="transBox"></div>
+    <div id="transProg"></div>
+    <div id="avisosLeg"></div>
+    <label>Estilo (miniaturas geradas pelo mesmo motor da exportação)</label>
+    <div class="presets" id="presets"></div>
+    <details class="ajuste"><summary>Ajustar estilo</summary>
+      <div class="row">
+        <div><label for="eFonte">Fonte</label><input type="text" id="eFonte" list="fontesComuns" class="w140"></div>
+        <div><label for="eTamanho">Tamanho</label><input type="number" id="eTamanho" min="24" max="180"></div>
+        <div><label for="eCor">Cor</label><input type="color" id="eCor"></div>
+        <div><label for="eContorno">Contorno</label><input type="number" id="eContorno" min="0" max="16" step="1"></div>
+        <div><label for="eContornoCor">Cor do contorno</label><input type="color" id="eContornoCor"></div>
+      </div>
+      <div class="row">
+        <label class="chk"><input type="checkbox" id="eFundo"> Fundo (caixa)</label>
+        <input type="color" id="eFundoCor" aria-label="Cor do fundo">
+        <div style="flex:1;min-width:120px"><label for="eFundoOp">Opacidade do fundo</label><input type="range" id="eFundoOp" min="0" max="1" step="0.05"></div>
+      </div>
+      <div><label for="ePos">Posição vertical: <span id="ePosV"></span></label><input type="range" id="ePos" min="0.05" max="0.95" step="0.01"></div>
+      <div class="row">
+        <label class="chk"><input type="checkbox" id="eMai"> Maiúsculas</label>
+        <label class="chk"><input type="checkbox" id="eNeg"> Negrito</label>
+        <label class="chk"><input type="checkbox" id="eDest"> Destacar a palavra falada</label>
+        <input type="color" id="eDestCor" aria-label="Cor do destaque">
+        <div><label for="ePpf">Palavras por frase</label><input type="number" id="ePpf" min="1" max="12"></div>
+      </div>
+      <datalist id="fontesComuns"><option>Arial</option><option>Segoe UI</option><option>Impact</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Bahnschrift</option></datalist>
+    </details>
+    <div class="row" style="justify-content:space-between;margin-top:12px">
+      <label style="margin:0">Frases que aparecem no vídeo (na ordem de saída) — edite o texto; use <kbd>|</kbd> para dividir</label>
+      <label class="chk" style="margin:0;font-size:12.5px"><input type="checkbox" id="soAtivo"> só do corte ativo</label>
+    </div>
+    <div class="frases esp" id="frases"></div>
+  </div>
+
+  <div class="card tab" id="tTit">
+    <h2>Texto na tela <span class="mut" style="font-weight:400">(queimado no vídeo)</span></h2>
+    <div class="legal">Texto do editor, não fala: tem conteúdo, tempo, posição e aparência próprios, separado da legenda, e nunca é atribuído a quem fala. O texto do post do TikTok fica em <b>Publicação</b>.</div>
+    <div id="titulos"></div>
+    <div class="row esp"><button id="bAddTit">Adicionar texto na tela</button>
+      <button id="bSugTit" class="pri">✨ Sugerir textos para o corte ativo</button></div>
+    <div id="titProg"></div>
+    <div id="titSug" aria-live="polite"></div>
+  </div>
+
+  <div class="card tab" id="tEf">
+    <h2>Áudio <span class="mut" style="font-weight:400">(ouça no player, vista Editado)</span></h2>
+    <label for="vo">Volume do áudio original: <span id="voV"></span></label><input type="range" id="vo" min="0" max="2" step="0.05">
+    <label class="chk"><input type="checkbox" id="realce"> Realce de voz (corta grave, reduz ruído de fundo, comprime de leve) <span class="mut">· só no renderizado</span></label>
+    <label class="chk"><input type="checkbox" id="norm"> Normalizar volume (−14 LUFS) <span class="mut">· só no renderizado</span></label>
+    <label for="arqMus">Música (opcional, que você tenha direito de usar)</label>
+    <div class="row"><input type="file" id="arqMus" accept="audio/*"><span id="musInfo" class="mut"></span><button id="bSemMus" class="mini">remover</button></div>
+    <label for="vm">Volume da música: <span id="vmV"></span></label><input type="range" id="vm" min="0" max="1" step="0.01">
+    <label class="chk"><input type="checkbox" id="duck"> Abaixar a música quando alguém fala <span class="mut">· só no renderizado</span></label>
+    <h2 class="sub">Efeitos sonoros</h2>
+    <div class="mut intro">Sons sintetizados pelo próprio app (sem licença a conferir) ou arquivos seus. Efeito preso à fonte acompanha o trecho quando você corta ou reordena.</div>
+    <div id="efsLista"></div>
+    <div class="row esp">
+      <select id="efSom" aria-label="Som"></select>
+      <button id="efOuvir" class="mini" title="Só o som, isolado">▶ ouvir o som</button>
+      <button id="efAdd">Adicionar no cursor do player</button>
+    </div>
+    <h2 class="sub">Sugestões de áudio</h2>
+    <div class="row">
+      <label for="audEscopo" class="mut inline">Escopo</label>
+      <select id="audEscopo"><option value="corte">Corte ativo</option><option value="linha">Edição completa (todos os cortes)</option></select>
+      <button id="bSugAud" class="pri">Sugerir áudio</button></div>
+    <div class="mut dica">Prioridade: entender a fala. Só sugere efeito com propósito, em pausas que já existem.</div>
+    <div id="audProg"></div>
+    <div id="audSug" aria-live="polite"></div>
+    <audio id="audPrev" hidden></audio>
+    <details class="ajuste" style="margin-top:16px"><summary>Imagem: enquadramento, zoom e transição</summary>
+      <label for="cropX">Enquadramento 9:16 — posição horizontal</label><input type="range" id="cropX" min="0" max="1" step="0.01">
+      <label class="chk"><input type="checkbox" id="zAtivo"> Zoom lento por segmento (alterna aproximar/afastar) <span class="mut">· só no renderizado</span></label>
+      <label for="zInt">Intensidade do zoom: <span id="zV"></span></label><input type="range" id="zInt" min="0.02" max="0.15" step="0.01">
+      <div class="row esp"><label for="trTipo" class="inline">Transição</label>
+        <select id="trTipo"><option value="corte">Corte seco</option><option value="fade">Fade pelo preto (não muda a duração)</option></select>
+        <input type="number" id="trDur" min="0.05" max="0.5" step="0.05" aria-label="Duração da transição"> s</div>
+    </details>
+  </div>
+
+  <div class="card tab" id="tPub">
+    <h2>Texto da publicação <span class="mut" style="font-weight:400">(legenda do post no TikTok; não aparece no vídeo)</span></h2>
+    <textarea id="pubTexto" rows="4" style="width:100%" maxlength="4000" aria-label="Texto da publicação" placeholder="Escreva aqui ou peça sugestões. Fica salvo no projeto."></textarea>
+    <div class="row esp"><button id="pubCopiar">Copiar</button><span id="pubConta" class="mut"></span>
+      <button id="bSugPub" class="pri">✨ Sugerir texto da publicação</button></div>
+    <div id="pubProg"></div>
+    <div id="pubSug" aria-live="polite"></div>
+    <div class="mut dica">O app não publica nada: copie o texto e cole no TikTok.</div>
+
+    <h2 class="sub">Prévia completa e exportação</h2>
+    <div class="row">
+      <button id="bPrevia">Prévia completa (540×960)</button>
+      <button id="bExportar" class="pri">Exportar 1080×1920</button>
+      <button id="bComparaVers" title="Prévia lado a lado de duas versões">Comparar versões</button>
+    </div>
+    <div id="tarefa" class="esp"></div>
+    <div id="previaBox"></div>
+    <div class="mut dica">Prévia e exportação usam o mesmo plano validado; a prévia só tem resolução menor.</div>
+    <div class="legal">Depois de baixar: ative o toggle "conteúdo gerado por IA" no TikTok quando houver voz ou imagem sintética. Abaixo de 61s não conta para o Creator Rewards.</div>
+
+  </div>
+</aside>
+</main>
+<script src="/editor.js"></script>
+</body>
+</html>

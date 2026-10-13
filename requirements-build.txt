@@ -1,0 +1,4 @@
+# Só para gerar o executável (construir_exe.bat). Instalado no .venv, nunca no Python do sistema.
+# PyInstaller 6.22.3: publicado em 2026-09-12 (consultado no PyPI em 2026-10-13).
+-r requirements.txt
+pyinstaller==6.22.3
